@@ -3,7 +3,7 @@ package logs
 type LogConfig struct {
 	ConsoleLogsFileSize     string `desc:"Maximum size of console log files before rotation."`
 	ConsoleLogsNumRotate    int    `desc:"Number of rotated console log files to keep."`
-	ConsoleLogsPath         string `desc:"Path to console log files."`
+	ConsoleLogsPath         string `flag:"-"`
 	ConsoleLogsBackupPath   string `desc:"Path to rotated console log files."`
 	AggLogsFileSize         string `desc:"Maximum size of aggregation log file before rotation."`
 	AggLogsNumRotate        int    `desc:"Number of rotated aggregation log files to keep."`

@@ -99,7 +99,7 @@ func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService, l
 	}
 }
 
-func runConman(debug bool, conmanService conman.ConmanService, credService creds.CredsService) {
+func runConman(config remoteConsoleConfig, conmanService conman.ConmanService, credService creds.CredsService) {
 	if conmanService == nil {
 		log.Panicf("Conman service is nil")
 	}
@@ -107,20 +107,18 @@ func runConman(debug bool, conmanService conman.ConmanService, credService creds
 	for {
 		nodes := nodes.CurrentNodes()
 
-		var requirePasswords []string
+		var requireCredentials []string
 		for _, nci := range nodes {
-			if nci.IsIPMI() || nci.IsPassSSH() {
-				requirePasswords = append(requirePasswords, nci.BmcName)
-			}
+			requireCredentials = append(requireCredentials, nci.ID)
 		}
 
-		passwords := credService.GetPasswordsWithRetries(requirePasswords, 15, 10)
-		hasNodes, err := conmanService.ConfigureConman(nodes, passwords)
+		passwords := credService.GetPasswordsWithRetries(requireCredentials, 15, 10)
+		hasNodes, err := conmanService.ConfigureConman(nodes, passwords, config.Creds.SshConsoleKeyPath)
 		if err != nil {
 			log.Panicf("Error configuring conman: %s", err)
 		}
 
-		if debug {
+		if config.DebugOnly {
 			time.Sleep(25 * time.Second)
 			log.Printf("Sleeping the executeConman process")
 		} else if !hasNodes {
@@ -167,7 +165,7 @@ func runService(config remoteConsoleConfig) error {
 	go watchForNodesUpdates(config, conmanService, logsService)
 
 	// start up the thread that runs conman
-	go runConman(config.DebugOnly, conmanService, credsService)
+	go runConman(config, conmanService, credsService)
 
 	// start the thread that will make sure that the conman creds are correct
 
@@ -178,7 +176,7 @@ func runService(config remoteConsoleConfig) error {
 	//  to be cleaned up.  This will trap any signals and wait to
 	//  process them until the channel is read.
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
 	console.SetupRoutes(config.Conman.LogsPath)
 

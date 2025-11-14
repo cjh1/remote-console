@@ -38,6 +38,70 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
+type ConsoleConnectionType string
+
+// componentEndpoints represents components endpoints response from SMD
+type componentEndpoints struct {
+	ComponentEndpoints []componentEndpoint
+}
+
+// TODO do we in need to take into account ManagedBy information?
+// componentEndpoint represents SMD component endpoint
+type componentEndpoint struct {
+	ID                 string              `json:"ID"`
+	Type               string              `json:"Type"`
+	Enabled            bool                `json:"Enabled,omitempty"`
+	RedfishEndpointFQDN string              `json:"RedfishEndpointFQDN,omitempty"`
+	RedfishSystemInfo  *redfishSystemInfo  `json:"RedfishSystemInfo,omitempty"`
+	RedfishManagerInfo *redfishManagerInfo `json:"RedfishManagerInfo,omitempty"`
+}
+
+// redfishSystemInfo contains computer system information
+type redfishSystemInfo struct {
+	Name          string         `json:"Name,omitempty"`
+	SerialConsole *serialConsole `json:"SerialConsole,omitempty"`
+}
+
+// redfishManagerInfo contains BMC/manager information
+type redfishManagerInfo struct {
+	Name         string        `json:"Name,omitempty"`
+	CommandShell *commandShell `json:"CommandShell,omitempty"`
+}
+
+// serialConsole describes the serial console capabilities
+type serialConsole struct {
+	MaxConcurrentSessions int                 `json:"MaxConcurrentSessions,omitempty"`
+	SSH                   *consoleServiceInfo `json:"SSH,omitempty"`
+	IPMI                  *consoleServiceInfo `json:"IPMI,omitempty"`
+	Telnet             *consoleServiceInfo `json:"Telnet,omitempty"`
+	WebSocket     *webSocketConsole `json:"WebSocket,omitempty"`
+
+}
+
+// commandShell describes the command shell capabilities
+type commandShell struct {
+	ServiceEnabled        bool     `json:"ServiceEnabled,omitempty"`
+	MaxConcurrentSessions int      `json:"MaxConcurrentSessions,omitempty"`
+	ConnectTypesSupported []string `json:"ConnectTypesSupported,omitempty"`
+}
+
+// consoleServiceInfo indicates if a console service is enabled
+type consoleServiceInfo struct {
+	ServiceEnabled bool `json:"ServiceEnabled,omitempty"`
+	Port		   int  `json:"Port,omitempty"`
+	HotKeySequenceDisplay string `json:"HotKeySequenceDisplay,omitempty"`
+    SharedWithManagerCLI bool `json:"SharedWithManagerCLI,omitempty"`
+	ConsoleEntryCommand string `json:"ConsoleEntryCommand,omitempty"`
+}
+
+type webSocketConsole struct {
+	ServiceEnabled bool `json:"ServiceEnabled"`
+	Interactive bool `json:"Interactive"`
+	ConsoleURI string `json:"ConsoleURI"`
+}
+
+
+
 var hardwareUpdateTime string = "Unknown"
 
 // CurrNodesMutex protects access to CurrentNodes
@@ -51,9 +115,6 @@ type NodeInfoAdapter struct {
 	*types.NodeConsoleInfo
 }
 
-func (n *NodeInfoAdapter) GetNodeName() string {
-	return n.NodeName
-}
 
 // redfishEndpoint holds HSM redfish endpoint information
 type redfishEndpoint struct {
@@ -83,182 +144,129 @@ func (sc stateComponent) String() string {
 	return fmt.Sprintf("ID:%s, Type:%s, Class:%s, NID:%d, Role:%s", sc.ID, sc.Type, sc.Class, sc.NID, sc.Role)
 }
 
-// getRedfishEndpoints queries HSM for redfish endpoint information
-func getRedfishEndpoints(smdURL string) ([]redfishEndpoint, error) {
-	type response struct {
-		RedfishEndpoints []redfishEndpoint
-	}
+// getComponentEndpoints queries HSM for the component endpoints
+func getComponentEndpoints(smdURL string) ([]componentEndpoint, error) {
+	var response componentEndpoints
 
-	// Query hsm to get the redfish endpoints
-	URL := smdURL + "hsm/v2/Inventory/RedfishEndpoints"
+	// Query hsm to get the component endpoints
+	URL := smdURL + "hsm/v2/Inventory/ComponentEndpoints"
 	data, _, err := utils.GetURL(URL, nil)
 	if err != nil {
-		log.Printf("Unable to get redfish endpoints from hsm:%s", err)
-		return nil, err
+		return nil, fmt.Errorf("unable to get component endpoints from hsm: %w", err)
 	}
 
 	// decode the response
-	rp := response{}
-	err = json.Unmarshal(data, &rp)
+	err = json.Unmarshal(data, &response)
 	if err != nil {
-		log.Printf("Error unmarshalling data: %s", err)
-		return nil, err
+		return nil, fmt.Errorf("unable to unmarshal component endpoints response: %w", err)
 	}
 
-	return rp.RedfishEndpoints, nil
+	return response.ComponentEndpoints, nil
 }
 
-// getStateComponents queries HSM for state component information
-func getStateComponents(smdURL string) ([]stateComponent, error) {
-	// get the component states from hsm - includes river/mountain information
-	type response struct {
-		Components []stateComponent
+func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConsoleInfo {
+	rf := endpoint.RedfishSystemInfo
+	if rf == nil {
+		return nil
 	}
 
-	// get the state components from hsm
-	URL := smdURL + "hsm/v2/State/Components"
-	data, _, err := utils.GetURL(URL, nil)
-	if err != nil {
-		log.Printf("Unable to get state component information from hsm:%s", err)
-		return nil, err
+	sc := rf.SerialConsole
+	if sc == nil {
+		return nil
 	}
 
-	// decode the response
-	rp := response{}
-	err = json.Unmarshal(data, &rp)
-	if err != nil {
-		// handle error
-		log.Printf("Error unmarshalling data: %s", err)
-		return nil, nil
+	switch {
+	case sc.SSH != nil && sc.SSH.ServiceEnabled:
+		return &types.NodeConsoleInfo{
+			ID:       endpoint.ID,
+			ConnectionType: types.SSH,
+			ConnectionHost: endpoint.RedfishEndpointFQDN,
+			ConnectionPort: sc.SSH.Port,
+		}
+	case sc.IPMI != nil && sc.IPMI.ServiceEnabled:
+		return &types.NodeConsoleInfo{
+			ID:       endpoint.ID,
+			ConnectionType: types.IPMI,
+			ConnectionHost: endpoint.RedfishEndpointFQDN,
+			ConnectionPort: sc.IPMI.Port,
+		}
+	
+	case sc.Telnet != nil && sc.Telnet.ServiceEnabled || sc.WebSocket != nil && sc.WebSocket.ServiceEnabled:
+		log.Printf("telnet and websocket not supported")
 	}
 
-	return rp.Components, nil
+
+	return nil
 }
 
-// getParadiseNodes queries HSM for Paradise (xd224) nodes
-func getParadiseNodes(smdURL string) (map[string]struct{}, error) {
-	// Paradise nodes are identified by having the manufacturer as 'Foxconn' and
-	// the model as either 'HPE Cray Supercomputing XD224' or '1A62WCB00-600-G'.
-	// There are a limited number of units that were sent to the field with the
-	// incorrect model '1A62WCB00-600-G' so we must support that.
-
-	// Structs to unmarshal the inventory data we care about
-	type HsmNodeFRUInfo struct {
-		Model        string
-		Manufacturer string
-		PartNumber   string
-		SerialNumber string
-	}
-	type HsmPopulatedFRU struct {
-		Type        string
-		Subtype     string
-		NodeFRUInfo HsmNodeFRUInfo
-	}
-	type HsmHardwareInventoryItem struct {
-		ID           string
-		Type         string
-		PopulatedFRU HsmPopulatedFRU
+func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConsoleInfo {
+	rf := endpoint.RedfishManagerInfo
+	if rf == nil {
+		return nil
 	}
 
-	// Query hsm to get the Paradise nodes
-	// NOTE: this only pulls the Foxconn BMCs from the inventory so there is a bit of
-	//  server side filtering going on
-	URL := smdURL + "hsm/v2/Inventory/Hardware?Manufacturer=Foxconn&Type=Node"
-	data, _, err := utils.GetURL(URL, nil)
-	if err != nil {
-		log.Printf("Unable to get hardware inventory from hsm:%s", err)
-		return nil, err
+	cs := rf.CommandShell
+	if cs == nil {
+		return nil
 	}
 
-	// decode the response
-	rp := []HsmHardwareInventoryItem{}
-	err = json.Unmarshal(data, &rp)
-	if err != nil {
-		log.Printf("Error unmarshalling data: %s", err)
-		return nil, err
-	}
-
-	// create a set of the Paradise items
-	nodes := map[string]struct{}{}
-	for _, node := range rp {
-		if node.PopulatedFRU.NodeFRUInfo.Model == "HPE Cray Supercomputing XD224" ||
-			node.PopulatedFRU.NodeFRUInfo.Model == "1A62WCB00-600-G" {
-			nodes[node.ID] = struct{}{}
+	for _, ct := range cs.ConnectTypesSupported {
+		switch strings.ToLower(ct) {
+		case types.SSH:
+			return &types.NodeConsoleInfo{
+				ID:       endpoint.ID,
+				ConnectionType: types.SSH,
+				ConnectionHost: endpoint.RedfishEndpointFQDN,
+			}
+		case types.IPMI:
+			return &types.NodeConsoleInfo{
+				ID:       endpoint.ID,
+				ConnectionType: types.IPMI,	
+				ConnectionHost: endpoint.RedfishEndpointFQDN,
+			}
+		default:
+			log.Printf("unsupported connection type: %s", ct)
 		}
 	}
 
-	return nodes, nil
+	return nil
 }
+
 
 // GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
-func GetCurrentNodesFromHSM(smdURL string) (nodes []types.NodeConsoleInfo) {
-	// Get the BMC IP addresses and user, and password for individual nodes.
-	// conman is only set up for River nodes.
+func currentNodesFromSMD(smdURL string) (nodes []types.NodeConsoleInfo, err error) {
+	
 	log.Printf("Starting to get current nodes on the system")
 
-	rfEndpoints, err := getRedfishEndpoints(smdURL)
+	endpoints, err := getComponentEndpoints(smdURL)
 	if err != nil {
-		log.Printf("Unable to build configuration file - error fetching redfish endpoints: %s", err)
-		return nil
+		return nil, fmt.Errorf("unable to get component endpoints: %w", err)
 	}
 
-	// get the state information to find mountain/river designation
-	stComps, err := getStateComponents(smdURL)
-	if err != nil {
-		log.Printf("Unable to build configuration file - error fetching state components: %s", err)
-		return nil
-	}
+	for _, ep := range endpoints {
 
-	log.Printf("Fetched %d redfish endpoints and %d state components", len(rfEndpoints), len(stComps))
+		if !ep.Enabled {
+			continue
+		}
 
-	// get the paradise nodes
-	// NOTE: this returns a pseudo-set to speed up lookups
-	// TODO clean up paradise node handling
-	paradiseNodes, err := getParadiseNodes(smdURL)
-	if err != nil {
-		// log the error but don't die - most systems will not have Paradise nodes anyway
-		log.Printf("Unable to identify if there are any Paradise nodes on the system. %s", err)
-	}
+		var nci *types.NodeConsoleInfo
 
-	// create a lookup map for the redfish information
-	rfMap := make(map[string]redfishEndpoint)
-	for _, rf := range rfEndpoints {
-		rfMap[rf.ID] = rf
-	}
+		// We have SerialConsole info
+		if ep.RedfishSystemInfo != nil && ep.RedfishSystemInfo.SerialConsole != nil {
+			nci = serialConsoleToNodeConsoleInfo(ep)
+		} else if ep.RedfishManagerInfo != nil && ep.RedfishManagerInfo.CommandShell != nil {
+			nci = commandShellToNodeConsoleInfo(ep)
+		}
 
-	// create river and mountain node information
-	nodes = nil
-	for _, sc := range stComps {
-		if sc.Type == "Node" {
-			// create a new entry for this node - take initial vals from state component info
-			newNode := types.NodeConsoleInfo{NodeName: sc.ID, Class: sc.Class, NID: sc.NID, Role: sc.Role}
-
-			// If this is a paradise node, switch the class name
-			if _, isParadise := paradiseNodes[sc.ID]; isParadise {
-				newNode.Class = "Paradise"
-			}
-
-			// pull information about the node BMC from the redfish information
-			bmcName := sc.ID[0:strings.LastIndex(sc.ID, "n")]
-			//log.Printf("Parsing node info. Node:%s, bmc:%s", sc.ID, bmcName)
-			if rf, ok := rfMap[bmcName]; ok {
-				//log.Print("  Found redfish endpoint info")
-				// found the bmc in the redfish information
-				newNode.BmcName = bmcName
-				newNode.BmcFqdn = rf.FQDN
-
-				// add to the list of nodes
-				nodes = append(nodes, newNode)
-
-			} else {
-				log.Printf("Node with no BMC present: %s, bmcName:%s", sc.ID, bmcName)
-			}
+		// If we have extracted console information add it to the list
+		if nci != nil {
+			nodes = append(nodes, *nci)
 		}
 	}
 
-	log.Printf("Completed getting current nodes on the system. Found %d nodes", len(nodes))
+	log.Printf("Completed getting current nodes on the system")
 
-	return nodes
+	return nodes, nil
 }
 
 func updateNodes(nodes []types.NodeConsoleInfo) bool {
@@ -276,19 +284,19 @@ func updateNodes(nodes []types.NodeConsoleInfo) bool {
 
 	for _, nci := range nodes {
 		//accumulate data for missing nodes to delete
-		delete(names_map, nci.NodeName)
+		delete(names_map, nci.ID)
 
-		curr_nci, present := currentNodes[nci.NodeName]
+		curr_nci, present := currentNodes[nci.ID]
 		if !present {
 			//
-			new_nodes[nci.NodeName] = &nci
+			new_nodes[nci.ID] = &nci
 		} else {
 			if *curr_nci != nci {
 				// something about the info has changed so we
 				// probably need to update.  we could refine this,
 				// but I imagine it almost never happens
 				changed = true
-				currentNodes[nci.NodeName] = &nci
+				currentNodes[nci.ID] = &nci
 			}
 		}
 	}
@@ -319,13 +327,17 @@ func CheckForUpdates(smdURL string) bool {
 	// keep track of if we need to redo the configuration
 	changed := false
 
-	fetched_nodes := GetCurrentNodesFromHSM(smdURL)
+	fetched_nodes, err := currentNodesFromSMD(smdURL)
+	if err != nil {
+		log.Printf("Error getting current nodes from SMD: %s", err)
+		return false
+	}
 
-	log.Printf("Fetched %d nodes from HSM", len(fetched_nodes))
+	log.Printf("Fetched %d nodes from SMD", len(fetched_nodes))
 
 	changed = updateNodes(fetched_nodes)
 
-	log.Printf("Completed getting current nodes from HSM")
+	log.Printf("Completed getting current nodes from SMD")
 
 	return changed
 }

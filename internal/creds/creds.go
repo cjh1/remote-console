@@ -114,7 +114,6 @@ type sshKeys struct {
 }
 
 // Look up the creds for the input endpoints with retries
-// TODO: I don't think we need this retry logic here any more?
 func (cs *credsService) GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials {
 	var passwords map[string]compcreds.CompCredentials = nil
 	var err error = nil

@@ -21,31 +21,27 @@ var MonitorIntervalSecs int = 30
 func (cs *credsService) CheckForUpdates() (bool, error) {
 	restartConman := false
 
-	var xnames []string = nil
-	sshKeyAuth := false
+	var ids []string = nil
 
 	currentNodes := nodes.CurrentNodes()
 	for _, nci := range currentNodes {
-		if nci.IsIPMI() || nci.IsPassSSH() {
-			xnames = append(xnames, nci.BmcName)
-		} else if nci.IsKeySSH() {
-			sshKeyAuth = true
-		}
+		ids = append(ids, nci.ID)
 	}
 
+	// TODO only check keys if configured
 	changed, err := cs.checkIfKeysChanged()
 	if err != nil {
 		return false, err
 	}
 
-	restartConman = sshKeyAuth && changed
+	restartConman = changed
 
-	changed, err = cs.checkIfPasswordsChanged(xnames)
+	changed, err = cs.checkIfPasswordsChanged(ids)
 	if err != nil {
 		return false, err
 	}
 
-	restartConman = len(xnames) > 0 && changed || restartConman
+	restartConman = len(ids) > 0 && changed || restartConman
 
 	return restartConman, nil
 }

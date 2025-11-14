@@ -52,28 +52,20 @@ func TestConfigureConman(t *testing.T) {
 
 	nodes := map[string]*types.NodeConsoleInfo{
 		"x0c0s1b0": &types.NodeConsoleInfo{
-			NodeName: "x0c0s1b0",
-			BmcName:  "x0c0s1b0",
-			BmcFqdn:  "x0c0s1b0",
-			Class:    "River",
-			NID:      0,
-			Role:     "x0c0s1b0",
+			ID: "x0c0s1b0",
+			ConnectionType: types.IPMI,
+			ConnectionHost:  "x0c0s1b0",
 		},
 		"x0c0s2b0": &types.NodeConsoleInfo{
-			NodeName: "x0c0s2b0",
-			BmcName:  "x0c0s2b0",
-			BmcFqdn:  "x0c0s2b0",
-			Class:    "Mountain",
-			NID:      1,
-			Role:     "x0c0s2b0",
+			ID: "x0c0s2b0",
+			ConnectionType: types.SSH,
+			ConnectionHost:  "x0c0s2b0",
+			ConnectionPort: 2222,
 		},
 		"x0c0s3b0": &types.NodeConsoleInfo{
-			NodeName: "x0c0s3b0",
-			BmcName:  "x0c0s3b0",
-			BmcFqdn:  "x0c0s3b0",
-			Class:    "Paradise",
-			NID:      2,
-			Role:     "x0c0s3b0",
+			ID: "x0c0s3b0",
+			ConnectionType: types.SSH,
+			ConnectionHost:  "x0c0s3b0",
 		},
 	}
 
@@ -81,6 +73,10 @@ func TestConfigureConman(t *testing.T) {
 		"x0c0s1b0": compcredentials.CompCredentials{
 			Username: "admin",
 			Password: "password1",
+		},
+		"x0c0s2b0": compcredentials.CompCredentials{
+			Username: "admin",
+			Password: "",
 		},
 		"x0c0s3b0": compcredentials.CompCredentials{
 			Username: "admin",
@@ -90,7 +86,7 @@ func TestConfigureConman(t *testing.T) {
 	service := NewConmanService(config)
 
 	// First call should create the config file
-	updated, err := service.ConfigureConman(nodes, passwords)
+	updated, err := service.ConfigureConman(nodes, passwords, "/tmp/ssh_console_key")
 	require.NoError(t, err)
 	require.True(t, updated)
 
@@ -111,8 +107,8 @@ GLOBAL seropts="115200,8n1"
 GLOBAL log="conman/console.%N"
 GLOBAL logopts="sanitize,timestamp"
 console name="x0c0s1b0" dev="ipmi:x0c0s1b0" ipmiopts="U:admin,P:password1,W:solpayloadsize"
-console name="x0c0s2b0" dev="/usr/bin/ssh-key-console x0c0s2b0"
-console name="x0c0s3b0" dev="/usr/bin/ssh-pwd-console x0c0s3b0 admin password3"
+console name="x0c0s2b0" dev="/usr/bin/ssh-key-console x0c0s2b0 2222 admin /tmp/ssh_console_key"
+console name="x0c0s3b0" dev="/usr/bin/ssh-pwd-console x0c0s3b0 0 admin password3"
 `
 	// Remove temporary directory path from generated config for comparison
 	generatedConfigStr := string(generatedConfig)

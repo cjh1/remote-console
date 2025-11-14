@@ -92,8 +92,8 @@ func (ls *logsService) UpdateLogRotateConf(nodes map[string]*types.NodeConsoleIn
 	// Add all nodes
 	for _, cni := range nodes {
 		log.Printf("cni")
-		xname := cni.NodeName
-		fn := filepath.Join(ls.config.ConsoleLogsPath, fmt.Sprintf("console.%s", xname))
+		id := cni.ID
+		fn := filepath.Join(ls.config.ConsoleLogsPath, fmt.Sprintf("console.%s", id))
 		writeConfigEntry(lrf, fn, ls.config.ConsoleLogsBackupPath, ls.config.ConsoleLogsNumRotate, ls.config.ConsoleLogsFileSize)
 	}
 

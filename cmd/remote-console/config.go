@@ -33,20 +33,24 @@ func DefaultConfig() remoteConsoleConfig {
 	}
 }
 
-func validateCredsConfig(config *creds.CredsConfig) error {
+func validateCredsConfig(config *remoteConsoleConfig) error {
+	credConfig := config.Creds
 
-	if config.SecureStorageAdapter != "" {
-		_, err := creds.NewStorageAdapter(string(config.SecureStorageAdapter))
+	// Copy over DebugOnly
+	credConfig.DebugOnly = config.DebugOnly
+
+	if credConfig.SecureStorageAdapter != "" {
+		_, err := creds.NewStorageAdapter(string(credConfig.SecureStorageAdapter))
 		if err != nil {
-			return fmt.Errorf("invalid secure storage adapter: %s, valid values are (vault or local)", config.SecureStorageAdapter)
+			return fmt.Errorf("invalid secure storage adapter: %s, valid values are (vault or local)", credConfig.SecureStorageAdapter)
 		}
 
-		if config.SecureStorageAdapter == creds.StorageAdapterLocal {
-			if config.LocalStoreFilePath == "" {
+		if credConfig.SecureStorageAdapter == creds.StorageAdapterLocal {
+			if credConfig.LocalStoreFilePath == "" {
 				return fmt.Errorf("a local storage path must be set when using the local secure storage adapter")
 			}
 
-			if config.LocalStoreKey == "" {
+			if credConfig.LocalStoreKey == "" {
 				return fmt.Errorf("a local storage key must be set when using the local secure storage adapter")
 			}
 		}
@@ -62,6 +66,14 @@ func validateLogsConfig(config *remoteConsoleConfig) error {
 	// conman will add the conman directory, so we point the logs service their
 	config.Log.ConsoleLogsPath = filepath.Join(conmanConfig.LogsPath, "conman")
 
+
+	return nil
+}
+
+func validateConmanConfig(config *remoteConsoleConfig) error {
+	// Copy over DebugOnly
+	config.Conman.DebugOnly = config.DebugOnly
+	
 	return nil
 }
 
@@ -71,7 +83,12 @@ func validateConfig(config *remoteConsoleConfig) error {
 		return err
 	}
 
-	if err := validateCredsConfig(&config.Creds); err != nil {
+	err = validateConmanConfig(config)
+	if err != nil {
+		return err
+	}
+
+	if err := validateCredsConfig(config); err != nil {
 		return err
 	}
 

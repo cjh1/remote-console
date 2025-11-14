@@ -7,32 +7,31 @@ package types
 
 import "fmt"
 
+// TODO - Does this have to be a separate package?
+
+
+const (
+	IPMI    = "ipmi"
+	SSH  = "ssh"
+	WebSocket = "websocket"
+	Telnet  = "telnet"
+	Oem   = "oem"
+)
+
+
 // NodeConsoleInfo holds all node level information needed to form a console connection
 // NOTE: this is the basic unit of information required for each node
 // Exported for use by console and creds packages
 
+
 type NodeConsoleInfo struct {
-	NodeName string // node xname
-	BmcName  string // bmc xname
-	BmcFqdn  string // full name of bmc
-	Class    string // river/mtn class
-	NID      int    // NID of the node
-	Role     string // role of the node
-}
-
-func (node NodeConsoleInfo) IsKeySSH() bool {
-	return node.Class == "Mountain" || node.Class == "Hill"
-}
-
-func (node NodeConsoleInfo) IsIPMI() bool {
-	return node.Class == "River"
-}
-
-func (node NodeConsoleInfo) IsPassSSH() bool {
-	return node.Class == "Paradise"
+	ID string // node xname
+	ConnectionType string // connection type
+	ConnectionHost string // connection host
+	ConnectionPort int    // connection port
 }
 
 func (nc NodeConsoleInfo) String() string {
-	return fmt.Sprintf("NodeName:%s, BmcName:%s, BmcFqdn:%s, Class:%s, NID:%d, Role:%s",
-		nc.NodeName, nc.BmcName, nc.BmcFqdn, nc.Class, nc.NID, nc.Role)
+	return fmt.Sprintf("ID:%s, ConnectionType:%s, ConnectionHost:%s, ConnectionPort:%d",
+		nc.ID, nc.ConnectionType, nc.ConnectionHost, nc.ConnectionPort)
 }

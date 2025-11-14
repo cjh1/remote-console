@@ -27,7 +27,7 @@ import (
 )
 
 type ConmanService interface {
-	ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error)
+	ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string) (bool, error)
 	ExecuteConman() error
 	SignalConmanTERM()
 	SignalConmanHUP()
@@ -67,11 +67,11 @@ func NewConmanService(config ConmanConfig) ConmanService {
 	}
 }
 
-func (cs *conmanService) ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials) (bool, error) {
+func (cs *conmanService) ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string) (bool, error) {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 
-	return cs.updateConfigFile(nodes, passwords, true)
+	return cs.updateConfigFile(nodes, passwords, sshConsoleKeyPath, true)
 }
 
 func generateBaseConfig(config ConmanConfig) ([]byte, error) {
@@ -97,7 +97,7 @@ func generateBaseConfig(config ConmanConfig) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, forceUpdate bool) (bool, error) {
+func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string, forceUpdate bool) (bool, error) {
 	log.Print("Updating the configuration file")
 
 	bs, err := generateBaseConfig(cs.config)
@@ -127,32 +127,41 @@ func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInf
 	consoles := make([]string, 0, len(nodes))
 
 	for _, nci := range nodes {
-		if nci.IsIPMI() {
-			creds, ok := passwords[nci.BmcName]
+		// IPMI connection
+		if nci.ConnectionType == types.IPMI {
+			creds, ok := passwords[nci.ID]
 			if !ok {
-				log.Printf("No creds record returned for %s", nci.BmcName)
+				log.Printf("No creds record returned for %s", nci.ID)
 			}
+
 			log.Printf("console name=\"%s\" dev=\"ipmi:%s\" ipmiopts=\"U:%s,P:REDACTED,W:solpayloadsize\"\n",
-				nci.NodeName, nci.BmcFqdn, creds.Username)
+				nci.ID, nci.ConnectionHost, creds.Username)
 			output := fmt.Sprintf("console name=\"%s\" dev=\"ipmi:%s\" ipmiopts=\"U:%s,P:%s,W:solpayloadsize\"\n",
-				nci.NodeName, nci.BmcFqdn, creds.Username, creds.Password)
+				nci.ID, nci.ConnectionHost, creds.Username, creds.Password)
 			consoles = append(consoles, output)
-		} else if nci.IsPassSSH() {
-			creds, ok := passwords[nci.BmcName]
+
+		// SSH connection
+		} else if nci.ConnectionType == types.SSH {
+			creds, ok := passwords[nci.ID]
 			if !ok {
-				log.Printf("No creds record returned for %s", nci.BmcName)
+				log.Printf("No creds record returned for %s", nci.ID)
 			}
-			log.Printf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %s REDACTED\"\n",
-				nci.NodeName, cs.config.ConsoleScriptsPath, nci.BmcFqdn, creds.Username)
-			output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %s %s\"\n",
-				nci.NodeName, cs.config.ConsoleScriptsPath, nci.BmcFqdn, creds.Username, creds.Password)
-			consoles = append(consoles, output)
-		} else if nci.IsKeySSH() {
-			log.Printf("console name=\"%s\" dev=\"%s/ssh-key-console %s\"\n",
-				nci.NodeName, cs.config.ConsoleScriptsPath, nci.NodeName)
-			output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-key-console %s\"\n",
-				nci.NodeName, cs.config.ConsoleScriptsPath, nci.NodeName)
-			consoles = append(consoles, output)
+
+			// If we have password creds, use those, otherwise use key-based
+			if creds.Password != "" {
+				log.Printf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %d %s REDACTED\"\n",
+					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username)
+				output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %d %s %s\"\n",
+					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, creds.Password)
+				consoles = append(consoles, output)
+			} else {
+				// Key based auth, note that we still use the username from the secure store
+				log.Printf("console name=\"%s\" dev=\"%s/ssh-key-console %s %d %s %s\"\n",
+					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath)
+				output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-key-console %s %d %s %s\"\n",
+					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath) 
+				consoles = append(consoles, output)
+			}
 		}
 	}
 
@@ -208,7 +217,7 @@ func (cs *conmanService) SignalConmanHUP() {
 		if cs.config.DebugOnly && nodes.CurrentNodes() != nil {
 			log.Printf("Respinning current log test files...")
 			for _, nci := range nodes.CurrentNodes() {
-				go cs.createTestLogFile(nci.NodeName, true)
+				go cs.createTestLogFile(nci.ID, true)
 			}
 		}
 	}
