@@ -10,16 +10,40 @@ import (
 	"time"
 	"path/filepath"
 
+	compcreds "github.com/Cray-HPE/hms-compcredentials"
 	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/console"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"github.com/OpenCHAMI/remote-console/internal/types"
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
+// ConmanService defines the interface for conman service operations
+type ConmanService interface {
+	ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcreds.CompCredentials, sshConsoleKeyPath string) (bool, error)
+	ExecuteConman() error
+	SignalConmanTERM()
+	SignalConmanHUP()
+}
+
+// CredsService defines the interface for credentials service operations
+type CredsService interface {
+	GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials
+	EnsureConsoleKeysPresent() (bool, error)
+	CheckForUpdates() (bool, error)
+}
+
+// LogsService defines the interface for logs service operations
+type LogsService interface {
+	UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo)
+	LogRotate(consoleLogsPath string) bool
+	AggregateFiles(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo)
+}
+
 // Watch for node updates and signal conman and log rotation as needed
-func watchForNodesUpdates(config remoteConsoleConfig, conmanService conman.ConmanService, logsService logs.LogsService) {
+func watchForNodesUpdates(config remoteConsoleConfig, conmanService ConmanService, logsService LogsService) {
 	if conmanService == nil {
 		log.Panicf("Conman service is nil")
 	}
@@ -56,7 +80,7 @@ func watchForNodesUpdates(config remoteConsoleConfig, conmanService conman.Conma
 }
 
 // Watch for credential updates and signal conman as needed
-func watchForCredUpdates(config remoteConsoleConfig, credsService creds.CredsService, conmanService conman.ConmanService) {
+func watchForCredUpdates(config remoteConsoleConfig, credsService CredsService, conmanService ConmanService) {
 	time.Sleep(time.Duration(config.CredsMonitorInterval) * time.Second)
 	for {
 		changed, err := credsService.CheckForUpdates()
@@ -74,7 +98,7 @@ func watchForCredUpdates(config remoteConsoleConfig, credsService creds.CredsSer
 }
 
 // Log rotation setup and loop
-func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService, logsService logs.LogsService) {
+func logRotate(config remoteConsoleConfig, conmanService ConmanService, logsService LogsService) {
 	logConfig := config.Log
 	// log the log rotation parameters
 	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logConfig.LogRotateEnabled, logConfig.LogRotateCheckFrequency)
@@ -103,7 +127,7 @@ func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService, l
 	}
 }
 
-func runConman(config remoteConsoleConfig, conmanService conman.ConmanService, credService creds.CredsService) {
+func runConman(config remoteConsoleConfig, conmanService ConmanService, credService CredsService) {
 	if conmanService == nil {
 		log.Panicf("Conman service is nil")
 	}

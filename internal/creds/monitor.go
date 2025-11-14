@@ -28,15 +28,16 @@ func (cs *credsService) CheckForUpdates() (bool, error) {
 		ids = append(ids, nci.ID)
 	}
 
-	// TODO only check keys if configured
-	changed, err := cs.checkIfKeysChanged()
-	if err != nil {
-		return false, err
+	// Only check keys if SecureStorageSshKeysPath is configured
+	if cs.config.SecureStorageSshKeysPath != "" {
+		changed, err := cs.checkIfKeysChanged()
+		if err != nil {
+			return false, err
+		}
+		restartConman = changed
 	}
 
-	restartConman = changed
-
-	changed, err = cs.checkIfPasswordsChanged(ids)
+	changed, err := cs.checkIfPasswordsChanged(ids)
 	if err != nil {
 		return false, err
 	}

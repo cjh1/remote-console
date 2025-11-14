@@ -76,13 +76,8 @@ func TestWatchConsoleLogFile(t *testing.T) {
 	defer cancel()
 
 	service := NewLogsService(config)
-	// Cast to credsService to access previousPasswords
-	logsService, ok := service.(*logsService)
-	if !ok {
-		t.Fatalf("Failed to cast CredsService to credsService")
-	}
 
-	go logsService.watchConsoleLogFile(ctx, tempDir, testXname)
+	go service.watchConsoleLogFile(ctx, tempDir, testXname)
 
 	// Write some lines to the console log file
 	testLines := []string{
@@ -191,14 +186,9 @@ func TestRespinAggLog(t *testing.T) {
 	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
 
 	service := NewLogsService(DefaultLogConfig())
-	// Cast to credsService to access respinAggLog
-	logsService, ok := service.(*logsService)
-	if !ok {
-		t.Fatalf("Failed to cast CredsService to credsService")
-	}
 
 	// First respin
-	logsService.respinAggLog()
+	service.respinAggLog()
 	require.NotNil(t, conAggLogger)
 
 	// Write a test line
@@ -208,7 +198,7 @@ func TestRespinAggLog(t *testing.T) {
 	firstLogger := conAggLogger
 
 	// Respin again
-	logsService.respinAggLog()
+	service.respinAggLog()
 	require.NotNil(t, conAggLogger)
 
 	// Ensure the logger pointer has changed

@@ -145,19 +145,13 @@ func TestRotateLogsOnce(t *testing.T) {
 
 	service.UpdateLogRotateConf(tempDir, nodes)
 
-	// cast to logsService to access rotateLogsOnce
-	logsService, ok := service.(*logsService)
-	if !ok {
-		t.Fatalf("Failed to cast CredsService to credsService")
-	}
-
 	// Perform log rotation check
 	fileStamp := make(map[string]time.Time)
-	changed := logsService.rotateLogsOnce(config, tempDir, fileStamp)
+	changed := service.rotateLogsOnce(config, tempDir, fileStamp)
 	// TODO This is the current behavior, but seems wrong - should be false if no files exist?
 	require.True(t, changed, "Change should be detected")
 
-	changed = logsService.rotateLogsOnce(config, tempDir, fileStamp)
+	changed = service.rotateLogsOnce(config, tempDir, fileStamp)
 	require.False(t, changed, "Nothing should have changed")
 
 	// Now create some log files to trigger rotation
@@ -180,7 +174,7 @@ func TestRotateLogsOnce(t *testing.T) {
 	fileStamp["x0c0s1b1"] = time.Now().Add(-2 * time.Hour)
 
 	// Perform log rotation check again
-	changed = logsService.rotateLogsOnce(config, tempDir, fileStamp)
+	changed = service.rotateLogsOnce(config, tempDir, fileStamp)
 	require.True(t, changed, "Log rotations should be detected")
 
 	// Verify that the log files have been rotated (moved to backup directory)

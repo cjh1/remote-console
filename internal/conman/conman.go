@@ -25,20 +25,13 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
-type ConmanService interface {
-	ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string) (bool, error)
-	ExecuteConman() error
-	SignalConmanTERM()
-	SignalConmanHUP()
-}
-
 type conmanService struct {
 	config  ConmanConfig
 	mutex   sync.Mutex
 	command *exec.Cmd
 }
 
-func NewConmanService(config ConmanConfig) ConmanService {
+func NewConmanService(config ConmanConfig) *conmanService {
 	return &conmanService{
 		config:  config,
 		mutex:   sync.Mutex{},

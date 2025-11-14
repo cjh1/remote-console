@@ -36,12 +36,6 @@ import (
 	sstorage "github.com/Cray-HPE/hms-securestorage"
 )
 
-type CredsService interface {
-	GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials
-	EnsureConsoleKeysPresent() (bool, error)
-	CheckForUpdates() (bool, error)
-}
-
 type credsService struct {
 	config                 CredsConfig
 	previousPasswords      map[string]compcreds.CompCredentials
@@ -49,7 +43,7 @@ type credsService struct {
 	previousCertHash       []byte
 }
 
-func NewCredsService(config CredsConfig) CredsService {
+func NewCredsService(config CredsConfig) *credsService {
 	return &credsService{
 		config:                 config,
 		previousPasswords:      nil,
@@ -161,6 +155,11 @@ func HashString(s string) ([]byte, error) {
 }
 
 func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
+	// Skip if SSH keys path is not configured
+	if cs.config.SecureStorageSshKeysPath == "" {
+		return false, nil
+	}
+
 	retVal := false
 
 	ss, err := createSecureStorage(cs.config)
