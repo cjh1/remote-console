@@ -58,7 +58,7 @@ func (ls *logsService) initLogRotate() error {
 }
 
 // UpdateLogRotateConf updates the log rotation configuration file
-func (ls *logsService) UpdateLogRotateConf(nodes map[string]*types.NodeConsoleInfo) {
+func (ls *logsService) UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo) {
 	log.Printf("before log mutex")
 	ls.mutex.Lock()
 	defer ls.mutex.Unlock()
@@ -93,7 +93,7 @@ func (ls *logsService) UpdateLogRotateConf(nodes map[string]*types.NodeConsoleIn
 	for _, cni := range nodes {
 		log.Printf("cni")
 		id := cni.ID
-		fn := filepath.Join(ls.config.ConsoleLogsPath, fmt.Sprintf("console.%s", id))
+		fn := filepath.Join(consoleLogsPath, fmt.Sprintf("console.%s", id))
 		writeConfigEntry(lrf, fn, ls.config.ConsoleLogsBackupPath, ls.config.ConsoleLogsNumRotate, ls.config.ConsoleLogsFileSize)
 	}
 
@@ -117,13 +117,13 @@ func writeConfigEntry(lrf *os.File, fileName string, oldDir string, numRotate in
 	fmt.Fprintln(lrf, "}")
 }
 
-func parseTimestamp(config LogConfig, line string) (string, time.Time, bool, bool) {
+func parseTimestamp(config LogConfig, consoleLogsPath string, line string) (string, time.Time, bool, bool) {
 	var nodeName string
 	var fd time.Time
 	isCon := false
 	isAgg := false
 
-	filePrefix := filepath.Join(config.ConsoleLogsPath, "console.")
+	filePrefix := filepath.Join(consoleLogsPath, "console.")
 	timeStampStr := ""
 	pos := strings.Index(line, filePrefix)
 	nodeStPos := 0
@@ -160,7 +160,7 @@ func parseTimestamp(config LogConfig, line string) (string, time.Time, bool, boo
 	return nodeName, fd, isCon, isAgg
 }
 
-func readLogRotTimestamps(config LogConfig, fileStamp map[string]time.Time) (conChanged, aggChanged bool) {
+func readLogRotTimestamps(config LogConfig, consoleLogsPath string, fileStamp map[string]time.Time) (conChanged, aggChanged bool) {
 	log.Printf("LOG ROTATE: Reading log rotation timestamps")
 	conChanged = false
 	aggChanged = false
@@ -189,7 +189,7 @@ func readLogRotTimestamps(config LogConfig, fileStamp map[string]time.Time) (con
 
 		fmt.Println(line)
 
-		if fileName, fd, isCon, isAgg := parseTimestamp(config, line); isCon || isAgg {
+		if fileName, fd, isCon, isAgg := parseTimestamp(config, consoleLogsPath, line); isCon || isAgg {
 			if _, ok := fileStamp[fileName]; ok {
 				if fileStamp[fileName] != fd {
 					log.Printf("LOG ROTATE:  %s rotated", fileName)
@@ -216,22 +216,22 @@ func readLogRotTimestamps(config LogConfig, fileStamp map[string]time.Time) (con
 }
 
 // LogRotate performs a log rotation check and rotation if needed
-func (ls *logsService) LogRotate() bool {
+func (ls *logsService) LogRotate(consoleLogsPath string) bool {
 	ls.mutex.Lock()
 	defer ls.mutex.Unlock()
 
 	consoleLogChanged := false
 	fileStamp := make(map[string]time.Time)
-	readLogRotTimestamps(ls.config, fileStamp)
+	readLogRotTimestamps(ls.config, consoleLogsPath, fileStamp)
 
 	if ls.config.LogRotateEnabled {
-		consoleLogChanged = ls.rotateLogsOnce(ls.config, fileStamp)
+		consoleLogChanged = ls.rotateLogsOnce(ls.config, consoleLogsPath, fileStamp)
 	}
 
 	return consoleLogChanged
 }
 
-func (ls *logsService) rotateLogsOnce(config LogConfig, fileStamp map[string]time.Time) bool {
+func (ls *logsService) rotateLogsOnce(config LogConfig, consoleLogsPath string, fileStamp map[string]time.Time) bool {
 	conChanged := false
 	aggChanged := false
 	log.Print("LOG ROTATE: Starting logrotate")
@@ -248,7 +248,7 @@ func (ls *logsService) rotateLogsOnce(config LogConfig, fileStamp map[string]tim
 	}
 	log.Printf("LOG ROTATE: Log Rotation completed with exit code: %d", exitCode)
 
-	if conChanged, aggChanged = readLogRotTimestamps(config, fileStamp); aggChanged {
+	if conChanged, aggChanged = readLogRotTimestamps(config, consoleLogsPath, fileStamp); aggChanged {
 		time.Sleep(5 * time.Second)
 
 		if aggChanged {

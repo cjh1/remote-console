@@ -15,7 +15,6 @@ func TestInitNewLogsService(t *testing.T) {
 	tempDir := t.TempDir()
 
 	config := DefaultLogConfig()
-	config.ConsoleLogsPath = tempDir
 	config.ConsoleLogsBackupPath = filepath.Join(tempDir, "backups")
 
 	NewLogsService(config)
@@ -33,13 +32,13 @@ func TestUpdateLogRotateConf(t *testing.T) {
 	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
 
 	nodes := map[string]*types.NodeConsoleInfo{
-		"x0c0s1b0": {NodeName: "x0c0s1b0"},
-		"x0c0s1b1": {NodeName: "x0c0s1b1"},
+		"x0c0s1b0": {ID: "x0c0s1b0"},
+		"x0c0s1b1": {ID: "x0c0s1b1"},
 	}
 
 	service := NewLogsService(config)
 
-	service.UpdateLogRotateConf(nodes)
+	service.UpdateLogRotateConf("/var/log/conman", nodes)
 
 	// Verify that the log rotation configuration file was created
 	data, err := os.ReadFile(config.LogRotateFilePath)
@@ -111,7 +110,7 @@ func TestReadLogRotTimestamps(t *testing.T) {
 
 	fileStamp := make(map[string]time.Time)
 	// Read the timestamps
-	conChanged, aggChanged := readLogRotTimestamps(config, fileStamp)
+	conChanged, aggChanged := readLogRotTimestamps(config, "/var/log/conman", fileStamp)
 	require.True(t, conChanged, "Console logs should show changes")
 	require.False(t, aggChanged, "Aggregation log should not show changes")
 
@@ -134,18 +133,17 @@ func TestRotateLogsOnce(t *testing.T) {
 	config := DefaultLogConfig()
 	config.LogRotateStateFilePath = logRotateStateFilePath
 	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
-	config.ConsoleLogsPath = tempDir
 	config.ConsoleLogsBackupPath = logBackupDir
 	config.LogRotateEnabled = true
 	config.ConsoleLogsFileSize = "1K"
 
 	nodes := map[string]*types.NodeConsoleInfo{
-		"x0c0s1b0": {NodeName: "x0c0s1b0"},
-		"x0c0s1b1": {NodeName: "x0c0s1b1"},
+		"x0c0s1b0": {ID: "x0c0s1b0"},
+		"x0c0s1b1": {ID: "x0c0s1b1"},
 	}
 	service := NewLogsService(config)
 
-	service.UpdateLogRotateConf(nodes)
+	service.UpdateLogRotateConf(tempDir, nodes)
 
 	// cast to logsService to access rotateLogsOnce
 	logsService, ok := service.(*logsService)
@@ -155,16 +153,16 @@ func TestRotateLogsOnce(t *testing.T) {
 
 	// Perform log rotation check
 	fileStamp := make(map[string]time.Time)
-	changed := logsService.rotateLogsOnce(config, fileStamp)
+	changed := logsService.rotateLogsOnce(config, tempDir, fileStamp)
 	// TODO This is the current behavior, but seems wrong - should be false if no files exist?
 	require.True(t, changed, "Change should be detected")
 
-	changed = logsService.rotateLogsOnce(config, fileStamp)
+	changed = logsService.rotateLogsOnce(config, tempDir, fileStamp)
 	require.False(t, changed, "Nothing should have changed")
 
 	// Now create some log files to trigger rotation
-	consoleLog1 := filepath.Join(config.ConsoleLogsPath, "console.x0c0s1b0")
-	consoleLog2 := filepath.Join(config.ConsoleLogsPath, "console.x0c0s1b1")
+	consoleLog1 := filepath.Join(tempDir, "console.x0c0s1b0")
+	consoleLog2 := filepath.Join(tempDir, "console.x0c0s1b1")
 
 	// Writ over 1KB of data to each log file
 	largeData := make([]byte, 2048)
@@ -182,7 +180,7 @@ func TestRotateLogsOnce(t *testing.T) {
 	fileStamp["x0c0s1b1"] = time.Now().Add(-2 * time.Hour)
 
 	// Perform log rotation check again
-	changed = logsService.rotateLogsOnce(config, fileStamp)
+	changed = logsService.rotateLogsOnce(config, tempDir, fileStamp)
 	require.True(t, changed, "Log rotations should be detected")
 
 	// Verify that the log files have been rotated (moved to backup directory)
@@ -219,7 +217,7 @@ func TestReadLogRotTimestampsNoEntries(t *testing.T) {
 
 	fileStamp := make(map[string]time.Time)
 	// Read the timestamps
-	conChanged, aggChanged := readLogRotTimestamps(config, fileStamp)
+	conChanged, aggChanged := readLogRotTimestamps(config, "/var/log/conman", fileStamp)
 	require.False(t, conChanged, "Console logs should not show changes")
 	require.False(t, aggChanged, "Aggregation log should not show changes")
 

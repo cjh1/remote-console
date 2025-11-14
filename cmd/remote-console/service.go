@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"path/filepath"
 
 	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/console"
@@ -22,6 +23,9 @@ func watchForNodesUpdates(config remoteConsoleConfig, conmanService conman.Conma
 	if conmanService == nil {
 		log.Panicf("Conman service is nil")
 	}
+
+	// conman will add the conman directory, so we point the logs service their
+	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
 
 	for {
 		// look for new nodes once
@@ -39,11 +43,11 @@ func watchForNodesUpdates(config remoteConsoleConfig, conmanService conman.Conma
 
 			// also update log rotation configuration
 			log.Printf("Info: Node changes detected, updating log rotation configuration")
-			logsService.UpdateLogRotateConf(nodes)
+			logsService.UpdateLogRotateConf(conmanLogsPath, nodes)
 
 			// make sure we are aggregating any new console log files
 			log.Printf("Info: Node changes detected, updating log aggregation configuration")
-			logsService.AggregateFiles(nodes)
+			logsService.AggregateFiles(conmanLogsPath, nodes)
 		}
 
 		// Wait for the correct polling interval
@@ -78,7 +82,7 @@ func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService, l
 	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logConfig.AggLogsFileSize, logConfig.AggLogsNumRotate)
 
 	// Create the log rotation configuration file
-	logsService.UpdateLogRotateConf(nodes.CurrentNodes())
+	logsService.UpdateLogRotateConf(config.Conman.LogsPath, nodes.CurrentNodes())
 
 	sleepSecs := time.Duration(300) * time.Second
 	logRotCheckFreqSec := logConfig.LogRotateCheckFrequency
@@ -89,7 +93,7 @@ func logRotate(config remoteConsoleConfig, conmanService conman.ConmanService, l
 	}
 
 	for {
-		restartConman := logsService.LogRotate()
+		restartConman := logsService.LogRotate(config.Conman.LogsPath)
 		if restartConman {
 			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
 			conmanService.SignalConmanHUP()

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
@@ -59,16 +58,6 @@ func validateCredsConfig(config *remoteConsoleConfig) error {
 	return nil
 }
 
-func validateLogsConfig(config *remoteConsoleConfig) error {
-	// Copy over ConsoleLogsPath
-	conmanConfig := config.Conman
-
-	// conman will add the conman directory, so we point the logs service their
-	config.Log.ConsoleLogsPath = filepath.Join(conmanConfig.LogsPath, "conman")
-
-
-	return nil
-}
 
 func validateConmanConfig(config *remoteConsoleConfig) error {
 	// Copy over DebugOnly
@@ -78,12 +67,7 @@ func validateConmanConfig(config *remoteConsoleConfig) error {
 }
 
 func validateConfig(config *remoteConsoleConfig) error {
-	err := validateLogsConfig(config)
-	if err != nil {
-		return err
-	}
-
-	err = validateConmanConfig(config)
+	err := validateConmanConfig(config)
 	if err != nil {
 		return err
 	}

@@ -3,7 +3,6 @@ package logs
 type LogConfig struct {
 	ConsoleLogsFileSize     string `desc:"Maximum size of console log files before rotation."`
 	ConsoleLogsNumRotate    int    `desc:"Number of rotated console log files to keep."`
-	ConsoleLogsPath         string `flag:"-"`
 	ConsoleLogsBackupPath   string `desc:"Path to rotated console log files."`
 	AggLogsFileSize         string `desc:"Maximum size of aggregation log file before rotation."`
 	AggLogsNumRotate        int    `desc:"Number of rotated aggregation log files to keep."`
@@ -19,7 +18,6 @@ func DefaultLogConfig() LogConfig {
 		LogRotateEnabled:        true,
 		ConsoleLogsFileSize:     "5M",
 		ConsoleLogsNumRotate:    2,
-		ConsoleLogsPath:         "/var/log/conman",
 		ConsoleLogsBackupPath:   "/var/log/conman.old",
 		AggLogsFileSize:         "20M",
 		AggLogsNumRotate:        1,

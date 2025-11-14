@@ -70,7 +70,6 @@ func TestWatchConsoleLogFile(t *testing.T) {
 	defer lf.Close()
 
 	config := DefaultLogConfig()
-	config.ConsoleLogsPath = tempDir
 
 	// Start watching the console log file
 	ctx, cancel := context.WithCancel(context.Background())
@@ -83,7 +82,7 @@ func TestWatchConsoleLogFile(t *testing.T) {
 		t.Fatalf("Failed to cast CredsService to credsService")
 	}
 
-	go logsService.watchConsoleLogFile(ctx, testXname)
+	go logsService.watchConsoleLogFile(ctx, tempDir, testXname)
 
 	// Write some lines to the console log file
 	testLines := []string{
@@ -139,19 +138,18 @@ func TestAggregateFiles(t *testing.T) {
 	}
 
 	config := DefaultLogConfig()
-	config.ConsoleLogsPath = tempDir
 
 	// Prepare node console info map
 	nodes := make(map[string]*types.NodeConsoleInfo)
 	for _, xname := range testXnames {
 		nodes[xname] = &types.NodeConsoleInfo{
-			NodeName: xname,
+			ID: xname,
 		}
 	}
 
 	service := NewLogsService(config)
 	// Start aggregating files
-	service.AggregateFiles(nodes)
+	service.AggregateFiles(tempDir, nodes)
 
 	// Write some lines to the console log files
 	testLines := map[string][]string{

@@ -49,7 +49,7 @@ var conAggLogFile string = ""
 var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
 
 // aggregateFile sets up tailing a log file to add to the aggregation file
-func (ls *logsService) aggregateFile(xname string) bool {
+func (ls *logsService) aggregateFile(consoleLogsPath string, xname string) bool {
 	newFile := false
 	if _, ok := tailThreads[xname]; !ok {
 		// indicate we are starting to watch this one
@@ -59,7 +59,7 @@ func (ls *logsService) aggregateFile(xname string) bool {
 		tailThreads[xname] = &cancel
 
 		// record being tracked and forward log file contents
-		go ls.watchConsoleLogFile(ctx, xname)
+		go ls.watchConsoleLogFile(ctx, consoleLogsPath, xname)
 	}
 	return newFile
 }
@@ -73,8 +73,8 @@ func StopTailing(xname string) {
 }
 
 // watchConsoleLogFile tails a console log file and writes to aggregation log
-func (ls *logsService) watchConsoleLogFile(ctx context.Context, xname string) {
-	filename := fmt.Sprintf("%s/console.%s", ls.config.ConsoleLogsPath, xname)
+func (ls *logsService) watchConsoleLogFile(ctx context.Context, consoleLogsPath string, xname string) {
+	filename := fmt.Sprintf("%s/console.%s", consoleLogsPath, xname)
 	log.Printf("Setting up tail of %s", filename)
 
 	// set up a tail operation on the console file
@@ -153,12 +153,12 @@ func (ls *logsService) respinAggLog() {
 	conAggLogger.Print("Starting aggregation log")
 }
 
-func (ls *logsService) AggregateFiles(nodes map[string]*types.NodeConsoleInfo) {
+func (ls *logsService) AggregateFiles(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo) {
 	fmt.Printf("AggregateFiles: Starting aggregation of console log files\n")
 	fmt.Printf("AggregateFiles: Starting aggregation of console log files: %d\n", len(nodes))
 
 	for xname := range nodes {
 		// make sure the node is being aggregated - no-op if already being done
-		ls.aggregateFile(xname)
+		ls.aggregateFile(consoleLogsPath, xname)
 	}
 }

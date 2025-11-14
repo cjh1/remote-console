@@ -7,9 +7,9 @@ import (
 )
 
 type LogsService interface {
-	UpdateLogRotateConf(nodes map[string]*types.NodeConsoleInfo)
-	LogRotate() bool
-	AggregateFiles(nodes map[string]*types.NodeConsoleInfo)
+	UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo)
+	LogRotate(consoleLogsPath string) bool
+	AggregateFiles(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo)
 }
 
 type logsService struct {
