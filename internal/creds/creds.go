@@ -59,7 +59,6 @@ func NewCredsService(config CredsConfig) CredsService {
 }
 
 type CredsConfig struct {
-	DebugOnly                  bool           `flag:"-"`
 	SshConsoleKeyPath          string         `desc:"Path where the SSH private key file for console access will be writen to."`
 	SecureStorageAdapter       StorageAdapter `desc:"Type of secure storage adapter to use for credentials retrieval."`
 	VaultBasePath              string         `desc:"Base path in Vault where credentials are stored."`
@@ -75,7 +74,6 @@ func DefaultCredsConfig() CredsConfig {
 		SshConsoleKeyPath:        "/app/conman.key",
 		VaultBasePath:            "",
 		VaultRole:                "",
-		DebugOnly:                false,
 		SecureStorageAdapter:     StorageAdapterVault,
 		LocalStoreFilePath:       "",
 		LocalStoreKey:            "",
@@ -171,13 +169,6 @@ func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
 
 // Look up the creds for the input endpoints
 func getPasswords(config CredsConfig, bmcXNames []string) (map[string]compcreds.CompCredentials, error) {
-	// NOTE: in update config thread
-	// if running in debug mode, skip hsm query
-	if config.DebugOnly {
-		log.Print("DEBUGONLY mode - skipping creds query")
-		return nil, nil
-	}
-
 	ss, err := createSecureStorage(config)
 	if err != nil {
 		return nil, fmt.Errorf("error creating secure storage adapter %#v\n", err)
@@ -202,10 +193,6 @@ func HashString(s string) ([]byte, error) {
 
 func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 	retVal := false
-	if cs.config.DebugOnly {
-		log.Print("Running in debug mode - skipping mountain cred generation")
-		return false, nil
-	}
 
 	ss, err := createSecureStorage(cs.config)
 	if err != nil {

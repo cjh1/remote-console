@@ -122,10 +122,7 @@ func runConman(config remoteConsoleConfig, conmanService conman.ConmanService, c
 			log.Panicf("Error configuring conman: %s", err)
 		}
 
-		if config.DebugOnly {
-			time.Sleep(25 * time.Second)
-			log.Printf("Sleeping the executeConman process")
-		} else if !hasNodes {
+		if !hasNodes {
 			log.Printf("No console nodes found - trying again")
 			time.Sleep(30 * time.Second)
 		} else {

@@ -22,7 +22,6 @@ import (
 
 	"github.com/Cray-HPE/hms-compcredentials"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/OpenCHAMI/remote-console/internal/types"
 )
 
@@ -40,7 +39,6 @@ type conmanService struct {
 }
 
 type ConmanConfig struct {
-	DebugOnly          bool   `flag:"-"`
 	BaseConfFilePath   string `desc:"Path to the base conman configuration template file."`
 	ConfFilePath       string `desc:"Path to the generated conman configuration file."`
 	LogsPath           string `desc:"Path to conman log files."`
@@ -50,7 +48,6 @@ type ConmanConfig struct {
 
 func DefaultConmanConfig() ConmanConfig {
 	return ConmanConfig{
-		DebugOnly:          false,
 		BaseConfFilePath:   "/app/conman_base.conf.tmpl",
 		ConfFilePath:       "/etc/conman.conf",
 		LogsPath:           "/var/log/conman",
@@ -213,13 +210,6 @@ func (cs *conmanService) SignalConmanHUP() {
 		cs.command.Process.Signal(syscall.SIGHUP)
 	} else {
 		log.Print("Warning: Attempting to signal conman process when nil.")
-
-		if cs.config.DebugOnly && nodes.CurrentNodes() != nil {
-			log.Printf("Respinning current log test files...")
-			for _, nci := range nodes.CurrentNodes() {
-				go cs.createTestLogFile(nci.ID, true)
-			}
-		}
 	}
 }
 
@@ -266,42 +256,4 @@ func (cs *conmanService) ExecuteConman() error {
 	log.Print("Conmand process has exited")
 
 	return nil
-}
-
-// DEBUG Function to create and add to a fake log file
-func (cs *conmanService) createTestLogFile(xname string, respin bool) {
-	// NOTE: this function is only for use in a debug environment where there
-	//  are no real console connections present.
-	sleepTime := 1 * time.Second
-	filename := fmt.Sprintf("%s/console.%s", cs.config.LogsPath, xname)
-
-	// Ff respin is true, only create if the file is not present - meant to
-	// be used when a logrotation has moved the original file and we need to
-	// create a new one back at the original location.  If the file is still there
-	// we do not need to re-create.
-	if respin {
-		if _, err := os.Stat(filename); err == nil {
-			log.Printf("Respinning log file %s, but it exists, so exiting", xname)
-			return
-		}
-	}
-
-	// create and start the log file
-	log.Printf("Opening fake log file: %s", filename)
-	file1, err := os.OpenFile(filename, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		log.Printf("Error creating file: %s", err)
-	}
-	log1 := log.New(file1, "", log.LstdFlags)
-
-	// start a loop that runs forever to write to the log files
-	var lineCnt int64 = 0
-	for {
-		log1.Print("Start new write:")
-		for i := 0; i < 10; i++ {
-			log1.Printf("%s, %d: ASAS:LDL:KJFSADSDfDSLKJYUIYHIUNMNKJHSDFKJHDSLKJDFHLKJDSFHASKAJUHSDAASDLKJFHLKJHADSLKJDSHFLKJDHFSD:OUISDFLKDJFHASLJKFHDKJFH", xname, lineCnt)
-			lineCnt++
-		}
-		time.Sleep(sleepTime)
-	}
 }

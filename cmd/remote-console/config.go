@@ -16,7 +16,6 @@ type remoteConsoleConfig struct {
 	NewNodeLookup        int    `desc:"Interval in seconds to look for new nodes"`
 	CredsMonitorInterval int    `desc:"Interval in seconds to monitor credential updates"`
 	SmdURL               string `desc:"URL for the SMD service"`
-	DebugOnly            bool   `flag:"-"`
 }
 
 func DefaultConfig() remoteConsoleConfig {
@@ -27,16 +26,12 @@ func DefaultConfig() remoteConsoleConfig {
 		HttpListen:           "0.0.0.0:8080",
 		NewNodeLookup:        120,
 		CredsMonitorInterval: 30,
-		DebugOnly:            false,
 		SmdURL:               "http://cray-smd/",
 	}
 }
 
 func validateCredsConfig(config *remoteConsoleConfig) error {
 	credConfig := config.Creds
-
-	// Copy over DebugOnly
-	credConfig.DebugOnly = config.DebugOnly
 
 	if credConfig.SecureStorageAdapter != "" {
 		_, err := creds.NewStorageAdapter(string(credConfig.SecureStorageAdapter))
@@ -58,20 +53,7 @@ func validateCredsConfig(config *remoteConsoleConfig) error {
 	return nil
 }
 
-
-func validateConmanConfig(config *remoteConsoleConfig) error {
-	// Copy over DebugOnly
-	config.Conman.DebugOnly = config.DebugOnly
-	
-	return nil
-}
-
 func validateConfig(config *remoteConsoleConfig) error {
-	err := validateConmanConfig(config)
-	if err != nil {
-		return err
-	}
-
 	if err := validateCredsConfig(config); err != nil {
 		return err
 	}

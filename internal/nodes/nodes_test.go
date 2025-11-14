@@ -9,8 +9,8 @@ import (
 
 func TestUpdateNodes(t *testing.T) {
 	newNodes := []types.NodeConsoleInfo{
-		{NodeName: "x0c0s1b0"},
-		{NodeName: "x0c0s1b1"},
+		{ID: "x0c0s1b0"},
+		{ID: "x0c0s1b1"},
 	}
 
 	updateNodes(newNodes)
@@ -23,7 +23,7 @@ func TestUpdateNodes(t *testing.T) {
 
 	// Remove one node and update again
 	newNodes = []types.NodeConsoleInfo{
-		{NodeName: "x0c0s1b0"},
+		{ID: "x0c0s1b0"},
 	}
 
 	updateNodes(newNodes)
@@ -36,8 +36,8 @@ func TestUpdateNodes(t *testing.T) {
 
 	// Add a new node and update again
 	newNodes = []types.NodeConsoleInfo{
-		{NodeName: "x0c0s1b0"},
-		{NodeName: "x0c0s1b2"},
+		{ID: "x0c0s1b0"},
+		{ID: "x0c0s1b2"},
 	}
 
 	updateNodes(newNodes)
