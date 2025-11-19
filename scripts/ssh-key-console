@@ -46,7 +46,6 @@ if {$port == 0} {
     set port 22
 }
 
-# TODO the session should be configurable I think!
 set pid [spawn ssh -p $port -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i $keypath $usr@$bmc]
 exit -onexit {
   exec kill $pid

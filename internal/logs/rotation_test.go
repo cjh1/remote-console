@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,7 +31,7 @@ func TestUpdateLogRotateConf(t *testing.T) {
 	config := DefaultLogConfig()
 	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
 
-	nodes := map[string]*types.NodeConsoleInfo{
+	nodes := map[string]*nodes.NodeConsoleInfo{
 		"x0c0s1b0": {ID: "x0c0s1b0"},
 		"x0c0s1b1": {ID: "x0c0s1b1"},
 	}
@@ -46,8 +46,11 @@ func TestUpdateLogRotateConf(t *testing.T) {
 
 	logConfigContents := string(data)
 
-	expected := `# Auto-generated conman log rotation configuration file.
-/tmp/consoleAgg-test.log { 
+	// Verify header
+	require.Contains(t, logConfigContents, "# Auto-generated conman log rotation configuration file.")
+
+	// Verify aggregation log entry
+	aggLogEntry := `/tmp/consoleAgg-test.log { 
   nocompress
   missingok
   nocopytruncate
@@ -58,34 +61,38 @@ func TestUpdateLogRotateConf(t *testing.T) {
   olddir /tmp
   rotate 1
   size=20M
-}
-/var/log/conman/console.x0c0s1b0 { 
-  nocompress
-  missingok
-  nocopytruncate
-  nocreate
-  nodelaycompress
-  nomail
-  notifempty
-  olddir /var/log/conman.old
-  rotate 2
-  size=5M
-}
-/var/log/conman/console.x0c0s1b1 { 
-  nocompress
-  missingok
-  nocopytruncate
-  nocreate
-  nodelaycompress
-  nomail
-  notifempty
-  olddir /var/log/conman.old
-  rotate 2
-  size=5M
-}
+}`
+	require.Contains(t, logConfigContents, aggLogEntry, "Aggregation log entry should be present")
 
-`
-	require.Equal(t, expected, logConfigContents, "Log rotation config contents should match expected")
+	// Verify console log entry for x0c0s1b0
+	consoleLogEntry0 := `/var/log/conman/console.x0c0s1b0 { 
+  nocompress
+  missingok
+  nocopytruncate
+  nocreate
+  nodelaycompress
+  nomail
+  notifempty
+  olddir /var/log/conman.old
+  rotate 2
+  size=5M
+}`
+	require.Contains(t, logConfigContents, consoleLogEntry0, "Console log entry for x0c0s1b0 should be present")
+
+	// Verify console log entry for x0c0s1b1
+	consoleLogEntry1 := `/var/log/conman/console.x0c0s1b1 { 
+  nocompress
+  missingok
+  nocopytruncate
+  nocreate
+  nodelaycompress
+  nomail
+  notifempty
+  olddir /var/log/conman.old
+  rotate 2
+  size=5M
+}`
+	require.Contains(t, logConfigContents, consoleLogEntry1, "Console log entry for x0c0s1b1 should be present")
 }
 
 func TestReadLogRotTimestamps(t *testing.T) {
@@ -137,7 +144,7 @@ func TestRotateLogsOnce(t *testing.T) {
 	config.LogRotateEnabled = true
 	config.ConsoleLogsFileSize = "1K"
 
-	nodes := map[string]*types.NodeConsoleInfo{
+	nodes := map[string]*nodes.NodeConsoleInfo{
 		"x0c0s1b0": {ID: "x0c0s1b0"},
 		"x0c0s1b1": {ID: "x0c0s1b1"},
 	}

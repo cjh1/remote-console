@@ -22,7 +22,7 @@ import (
 
 	"github.com/Cray-HPE/hms-compcredentials"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
 type conmanService struct {
@@ -39,11 +39,11 @@ func NewConmanService(config ConmanConfig) *conmanService {
 	}
 }
 
-func (cs *conmanService) ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string) (bool, error) {
+func (cs *conmanService) ConfigureConman(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string) (bool, error) {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 
-	return cs.updateConfigFile(nodes, passwords, sshConsoleKeyPath, true)
+	return cs.updateConfigFile(nodeMap, passwords, sshConsoleKeyPath, true)
 }
 
 func generateBaseConfig(config ConmanConfig) ([]byte, error) {
@@ -69,7 +69,7 @@ func generateBaseConfig(config ConmanConfig) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string, forceUpdate bool) (bool, error) {
+func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string, forceUpdate bool) (bool, error) {
 	log.Print("Updating the configuration file")
 
 	bs, err := generateBaseConfig(cs.config)
@@ -96,11 +96,11 @@ func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInf
 
 	log.Printf("Getting current nodes to populate conman configuration")
 
-	consoles := make([]string, 0, len(nodes))
+	consoles := make([]string, 0, len(nodeMap))
 
-	for _, nci := range nodes {
+	for _, nci := range nodeMap {
 		// IPMI connection
-		if nci.ConnectionType == types.IPMI {
+		if nci.ConnectionType == nodes.IPMI {
 			creds, ok := passwords[nci.ID]
 			if !ok {
 				log.Printf("No creds record returned for %s", nci.ID)
@@ -113,7 +113,7 @@ func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInf
 			consoles = append(consoles, output)
 
 		// SSH connection
-		} else if nci.ConnectionType == types.SSH {
+		} else if nci.ConnectionType == nodes.SSH {
 			creds, ok := passwords[nci.ID]
 			if !ok {
 				log.Printf("No creds record returned for %s", nci.ID)
@@ -145,7 +145,7 @@ func (cs *conmanService) updateConfigFile(nodes map[string]*types.NodeConsoleInf
 		}
 	}
 
-	return len(nodes) > 0, nil
+	return len(nodeMap) > 0, nil
 }
 
 func willUpdateConfig(baseConfig []byte) bool {

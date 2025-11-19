@@ -9,7 +9,7 @@ import (
 	"github.com/Cray-HPE/hms-compcredentials"
 	"github.com/stretchr/testify/require"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
 func TestGenerateBaseConfig(t *testing.T) {
@@ -50,21 +50,21 @@ func TestConfigureConman(t *testing.T) {
 	config.LogsPath = filepath.Join(tempDir, "logs")
 	config.PidFilePath = filepath.Join(tempDir, "conman.pid")
 
-	nodes := map[string]*types.NodeConsoleInfo{
-		"x0c0s1b0": &types.NodeConsoleInfo{
+	nodes := map[string]*nodes.NodeConsoleInfo{
+		"x0c0s1b0": &nodes.NodeConsoleInfo{
 			ID: "x0c0s1b0",
-			ConnectionType: types.IPMI,
+			ConnectionType: nodes.IPMI,
 			ConnectionHost:  "x0c0s1b0",
 		},
-		"x0c0s2b0": &types.NodeConsoleInfo{
+		"x0c0s2b0": &nodes.NodeConsoleInfo{
 			ID: "x0c0s2b0",
-			ConnectionType: types.SSH,
+			ConnectionType: nodes.SSH,
 			ConnectionHost:  "x0c0s2b0",
 			ConnectionPort: 2222,
 		},
-		"x0c0s3b0": &types.NodeConsoleInfo{
+		"x0c0s3b0": &nodes.NodeConsoleInfo{
 			ID: "x0c0s3b0",
-			ConnectionType: types.SSH,
+			ConnectionType: nodes.SSH,
 			ConnectionHost:  "x0c0s3b0",
 		},
 	}

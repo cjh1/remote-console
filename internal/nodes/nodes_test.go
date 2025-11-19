@@ -3,12 +3,11 @@ package nodes
 import (
 	"testing"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestUpdateNodes(t *testing.T) {
-	newNodes := []types.NodeConsoleInfo{
+	newNodes := []NodeConsoleInfo{
 		{ID: "x0c0s1b0"},
 		{ID: "x0c0s1b1"},
 	}
@@ -22,7 +21,7 @@ func TestUpdateNodes(t *testing.T) {
 	require.Contains(t, currentNodes, "x0c0s1b1", "Node x0c0s1b1 should be present")
 
 	// Remove one node and update again
-	newNodes = []types.NodeConsoleInfo{
+	newNodes = []NodeConsoleInfo{
 		{ID: "x0c0s1b0"},
 	}
 
@@ -35,7 +34,7 @@ func TestUpdateNodes(t *testing.T) {
 	require.NotContains(t, currentNodes, "x0c0s1b1", "Node x0c0s1b1 should not be present")
 
 	// Add a new node and update again
-	newNodes = []types.NodeConsoleInfo{
+	newNodes = []NodeConsoleInfo{
 		{ID: "x0c0s1b0"},
 		{ID: "x0c0s1b2"},
 	}

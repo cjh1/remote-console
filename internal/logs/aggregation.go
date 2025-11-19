@@ -36,7 +36,7 @@ import (
 
 	"github.com/hpcloud/tail"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
 // Global vars
@@ -153,7 +153,7 @@ func (ls *logsService) respinAggLog() {
 	conAggLogger.Print("Starting aggregation log")
 }
 
-func (ls *logsService) AggregateFiles(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo) {
+func (ls *logsService) AggregateFiles(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo) {
 	fmt.Printf("AggregateFiles: Starting aggregation of console log files\n")
 	fmt.Printf("AggregateFiles: Starting aggregation of console log files: %d\n", len(nodes))
 

@@ -16,13 +16,12 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
-	"github.com/OpenCHAMI/remote-console/internal/types"
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
 // ConmanService defines the interface for conman service operations
 type ConmanService interface {
-	ConfigureConman(nodes map[string]*types.NodeConsoleInfo, passwords map[string]compcreds.CompCredentials, sshConsoleKeyPath string) (bool, error)
+	ConfigureConman(nodes map[string]*nodes.NodeConsoleInfo, passwords map[string]compcreds.CompCredentials, sshConsoleKeyPath string) (bool, error)
 	ExecuteConman() error
 	SignalConmanTERM()
 	SignalConmanHUP()
@@ -37,9 +36,9 @@ type CredsService interface {
 
 // LogsService defines the interface for logs service operations
 type LogsService interface {
-	UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo)
+	UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo)
 	LogRotate(consoleLogsPath string) bool
-	AggregateFiles(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo)
+	AggregateFiles(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo)
 }
 
 // Watch for node updates and signal conman and log rotation as needed

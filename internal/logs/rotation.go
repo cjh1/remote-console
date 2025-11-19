@@ -36,7 +36,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
@@ -58,7 +58,7 @@ func (ls *logsService) initLogRotate() error {
 }
 
 // UpdateLogRotateConf updates the log rotation configuration file
-func (ls *logsService) UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*types.NodeConsoleInfo) {
+func (ls *logsService) UpdateLogRotateConf(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo) {
 	log.Printf("before log mutex")
 	ls.mutex.Lock()
 	defer ls.mutex.Unlock()

@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
 func TestWriteToAggLog(t *testing.T) {
@@ -135,16 +135,16 @@ func TestAggregateFiles(t *testing.T) {
 	config := DefaultLogConfig()
 
 	// Prepare node console info map
-	nodes := make(map[string]*types.NodeConsoleInfo)
+	nodeMap := make(map[string]*nodes.NodeConsoleInfo)
 	for _, xname := range testXnames {
-		nodes[xname] = &types.NodeConsoleInfo{
+		nodeMap[xname] = &nodes.NodeConsoleInfo{
 			ID: xname,
 		}
 	}
 
 	service := NewLogsService(config)
 	// Start aggregating files
-	service.AggregateFiles(tempDir, nodes)
+	service.AggregateFiles(tempDir, nodeMap)
 
 	// Write some lines to the console log files
 	testLines := map[string][]string{

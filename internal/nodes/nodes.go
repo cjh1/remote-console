@@ -34,7 +34,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/types"
 	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
@@ -108,11 +107,11 @@ var hardwareUpdateTime string = "Unknown"
 var currNodesMutex = &sync.Mutex{}
 
 // CurrentNodes is the map of all nodes being monitored
-var currentNodes map[string]*types.NodeConsoleInfo = make(map[string]*types.NodeConsoleInfo)
+var currentNodes map[string]*NodeConsoleInfo = make(map[string]*NodeConsoleInfo)
 
-// NodeInfoAdapter adapts types.NodeConsoleInfo to logs.NodeInfo interface
+// NodeInfoAdapter adapts NodeConsoleInfo to logs.NodeInfo interface
 type NodeInfoAdapter struct {
-	*types.NodeConsoleInfo
+	*NodeConsoleInfo
 }
 
 
@@ -164,7 +163,7 @@ func getComponentEndpoints(smdURL string) ([]componentEndpoint, error) {
 	return response.ComponentEndpoints, nil
 }
 
-func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConsoleInfo {
+func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo {
 	rf := endpoint.RedfishSystemInfo
 	if rf == nil {
 		return nil
@@ -177,16 +176,16 @@ func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConso
 
 	switch {
 	case sc.SSH != nil && sc.SSH.ServiceEnabled:
-		return &types.NodeConsoleInfo{
+		return &NodeConsoleInfo{
 			ID:       endpoint.ID,
-			ConnectionType: types.SSH,
+			ConnectionType: SSH,
 			ConnectionHost: endpoint.RedfishEndpointFQDN,
 			ConnectionPort: sc.SSH.Port,
 		}
 	case sc.IPMI != nil && sc.IPMI.ServiceEnabled:
-		return &types.NodeConsoleInfo{
+		return &NodeConsoleInfo{
 			ID:       endpoint.ID,
-			ConnectionType: types.IPMI,
+			ConnectionType: IPMI,
 			ConnectionHost: endpoint.RedfishEndpointFQDN,
 			ConnectionPort: sc.IPMI.Port,
 		}
@@ -199,7 +198,7 @@ func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConso
 	return nil
 }
 
-func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConsoleInfo {
+func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo {
 	rf := endpoint.RedfishManagerInfo
 	if rf == nil {
 		return nil
@@ -212,16 +211,16 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConsol
 
 	for _, ct := range cs.ConnectTypesSupported {
 		switch strings.ToLower(ct) {
-		case types.SSH:
-			return &types.NodeConsoleInfo{
+		case SSH:
+			return &NodeConsoleInfo{
 				ID:       endpoint.ID,
-				ConnectionType: types.SSH,
+				ConnectionType: SSH,
 				ConnectionHost: endpoint.RedfishEndpointFQDN,
 			}
-		case types.IPMI:
-			return &types.NodeConsoleInfo{
+		case IPMI:
+			return &NodeConsoleInfo{
 				ID:       endpoint.ID,
-				ConnectionType: types.IPMI,	
+				ConnectionType: IPMI,	
 				ConnectionHost: endpoint.RedfishEndpointFQDN,
 			}
 		default:
@@ -234,7 +233,7 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *types.NodeConsol
 
 
 // GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
-func currentNodesFromSMD(smdURL string) (nodes []types.NodeConsoleInfo, err error) {
+func currentNodesFromSMD(smdURL string) (nodes []NodeConsoleInfo, err error) {
 	
 	log.Printf("Starting to get current nodes on the system")
 
@@ -249,7 +248,7 @@ func currentNodesFromSMD(smdURL string) (nodes []types.NodeConsoleInfo, err erro
 			continue
 		}
 
-		var nci *types.NodeConsoleInfo
+		var nci *NodeConsoleInfo
 
 		// We have SerialConsole info
 		if ep.RedfishSystemInfo != nil && ep.RedfishSystemInfo.SerialConsole != nil {
@@ -269,14 +268,14 @@ func currentNodesFromSMD(smdURL string) (nodes []types.NodeConsoleInfo, err erro
 	return nodes, nil
 }
 
-func updateNodes(nodes []types.NodeConsoleInfo) bool {
+func updateNodes(nodes []NodeConsoleInfo) bool {
 	changed := false
 	// compare with current nodes
 
 	currNodesMutex.Lock()
 	defer currNodesMutex.Unlock()
 
-	new_nodes := make(map[string]*types.NodeConsoleInfo)
+	new_nodes := make(map[string]*NodeConsoleInfo)
 	names_map := make(map[string]bool)
 	for name, _ := range currentNodes {
 		names_map[name] = true
@@ -342,7 +341,7 @@ func CheckForUpdates(smdURL string) bool {
 	return changed
 }
 
-func CurrentNodes() map[string]*types.NodeConsoleInfo {
+func CurrentNodes() map[string]*NodeConsoleInfo {
 	log.Println("Trying to lock")
 	currNodesMutex.Lock()
 	log.Println("Locked")
@@ -350,7 +349,7 @@ func CurrentNodes() map[string]*types.NodeConsoleInfo {
 	defer currNodesMutex.Unlock()
 
 	// create a copy of the current nodes to return
-	nodesCopy := make(map[string]*types.NodeConsoleInfo)
+	nodesCopy := make(map[string]*NodeConsoleInfo)
 	for k, v := range currentNodes {
 		nodesCopy[k] = v
 	}
