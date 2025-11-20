@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/websocket"
-	"github.com/hpcloud/tail"
+	"github.com/nxadm/tail"
 )
 
 type consoleTailSession struct {

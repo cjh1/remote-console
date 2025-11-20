@@ -23,7 +23,7 @@ func DefaultConfig() remoteConsoleConfig {
 		Log:                  logs.DefaultLogConfig(),
 		Conman:               conman.DefaultConmanConfig(),
 		Creds:                creds.DefaultCredsConfig(),
-		HttpListen:           "0.0.0.0:8080",
+		HttpListen:           "0.0.0.0:26776",
 		NewNodeLookup:        120,
 		CredsMonitorInterval: 30,
 		SmdURL:               "http://cray-smd/",

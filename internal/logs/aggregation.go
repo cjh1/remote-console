@@ -34,7 +34,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hpcloud/tail"
+	"github.com/nxadm/tail"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
@@ -91,7 +91,11 @@ func (ls *logsService) watchConsoleLogFile(ctx context.Context, consoleLogsPath 
 			log.Printf("Cancelling tail of %s", xname)
 			t.Stop()
 			return
-		case line := <-t.Lines:
+		case line, ok := <-t.Lines:
+			// This channel is closed while waiting for the file to appear
+			if !ok {
+				return
+			}
 			if line.Err != nil {
 				log.Printf("Error reading line from %s:%s", xname, line.Err)
 				continue
@@ -114,6 +118,7 @@ func writeToAggLog(xname, line string) {
 	conAggLogger.Printf("%s [%s] %s", timestamp, xname, line)
 }
 
+// TODO with nxadm this should be necessary?
 // RespinAggLog reopens the aggregation log file (after rotation)
 func (ls *logsService) respinAggLog() {
 	conAggMutex.Lock()

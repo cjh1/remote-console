@@ -10,8 +10,8 @@ type ConmanConfig struct {
 
 func DefaultConmanConfig() ConmanConfig {
 	return ConmanConfig{
-		BaseConfFilePath:   "/app/conman_base.conf.tmpl",
-		ConfFilePath:       "/etc/conman.conf",
+		BaseConfFilePath:   "/app/conman.conf.tmpl",
+		ConfFilePath:       "/app/conman.conf",
 		LogsPath:           "/var/log/conman",
 		PidFilePath:        "/var/run/conman.pid",
 		ConsoleScriptsPath: "/usr/bin",
