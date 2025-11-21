@@ -63,12 +63,14 @@ func SetupRoutes(consoleLogsPath string) {
 	RequestRouter.Get("/remote-console/readiness", doReadiness)
 	RequestRouter.Get("/remote-console/health", doHealth)
 
+	RequestRouter.Get("/remote-console/consoles", doConsoles)
+
 	// WebSocket console access endpoints
 	// These handle their own errors via WebSocket close frames after upgrade
-	RequestRouter.Get("/remote-console/console/{nodeID}/tail", func(w http.ResponseWriter, r *http.Request) {
+	RequestRouter.Get("/remote-console/consoles/{nodeID}/tail", func(w http.ResponseWriter, r *http.Request) {
 		doTailConsole(consoleLogsPath, w, r)
 	})
-	RequestRouter.Get("/remote-console/console/{nodeID}", doInteractiveConsole)
+	RequestRouter.Get("/remote-console/consoles/{nodeID}", doInteractiveConsole)
 
 	// debug only routes
 	// router.Get("/remote-console/info", dbs.doInfo)

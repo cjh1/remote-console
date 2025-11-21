@@ -152,10 +152,14 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		return
 	}
 
+	log.Printf("Tailing console file: %s", filename)
+
 	cts.streamConsoleTail(follow)
 }
 
 func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
+	log.Printf("doTailConsole called")
+
 	ctx := r.Context()
 
 	// Make sure the request is cleaned up
@@ -173,6 +177,8 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("Tailing console for node: %s", nodeID)
 
 	// Make sure we are monitoring a valid node
 	if exists := validateNode(nodeID); !exists {
@@ -210,6 +216,8 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 		// Can't send HTTP error after upgrade attempt
 		return
 	}
+
+	log.Printf("WebSocket path: %s", consoleLogsPath)
 
 	// From here on, errors must be sent via WebSocket close frames
 	session := newConsoleTailSession(ctx, consoleLogsPath, nodeID, conn)

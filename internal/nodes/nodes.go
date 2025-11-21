@@ -109,6 +109,7 @@ var currNodesMutex = &sync.Mutex{}
 // CurrentNodes is the map of all nodes being monitored
 var currentNodes map[string]*NodeConsoleInfo = make(map[string]*NodeConsoleInfo)
 
+// TODO do we still need this?
 // NodeInfoAdapter adapts NodeConsoleInfo to logs.NodeInfo interface
 type NodeInfoAdapter struct {
 	*NodeConsoleInfo

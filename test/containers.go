@@ -11,6 +11,13 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+type redfishEndpoint struct {
+	Host	 string 
+	Username string 
+	Password string 
+}
+
+
 // startVault starts a Vault container with development mode enabled
 func startVault(ctx context.Context, networks ...string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
@@ -200,7 +207,26 @@ func startSMD(ctx context.Context, networks ...string) (testcontainers.Container
 }
 
 // startRedfishEmulator starts a Redfish emulator for a specific xname
-func startRedfishEmulator(ctx context.Context, network string, xname string) (testcontainers.Container, error) {
+func startRedfishEmulator(ctx context.Context, network string, xname string, mock string, authConfig *string) (testcontainers.Container, error) {
+	env := map[string]string{
+			"MOCKUPFOLDER": mock,
+			"MAC_SCHEMA":   "Mountain",
+			"XNAME":        xname,
+			"PORT":         "443",
+		}
+
+	if authConfig != nil {
+		env["AUTH_CONFIG"] = *authConfig
+	}
+
+	mocksDirectory, err := filepath.Abs(filepath.Join(".", "redfish-emulator-mocks"))
+	if err != nil {
+		return nil, fmt.Errorf("unable to determine absolute path for mocks directory: %w", err)
+	}
+
+	
+	fmt.Printf("Using mocks directory: %s\n", mocksDirectory)
+
 	req := testcontainers.ContainerRequest{
 		Image:    "ghcr.io/openchami/csm-rie:v1.6.7",
 		Hostname: xname,
@@ -208,13 +234,18 @@ func startRedfishEmulator(ctx context.Context, network string, xname string) (te
 		NetworkAliases: map[string][]string{
 			network: {xname},
 		},
-		Env: map[string]string{
-			"MOCKUPFOLDER": "EX425",
-			"MAC_SCHEMA":   "Mountain",
-			"XNAME":        xname,
-			"PORT":         "443",
+		Env: env,
+		WaitingFor: wait.ForLog("Running on all addresses").WithStartupTimeout(60 * time.Second),
+		Files: []testcontainers.ContainerFile{
+			{
+				HostFilePath:      filepath.Join(mocksDirectory, "ssh"),
+				ContainerFilePath: "/app/api_emulator/redfish/static/",	
+			},
+			{
+				HostFilePath:      filepath.Join(mocksDirectory, "ipmi"),
+				ContainerFilePath: "/app/api_emulator/redfish/static/",	
+			},
 		},
-		WaitingFor: wait.ForLog("Running on all addresses").WithStartupTimeout(30 * time.Second),
 	}
 
 	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -224,19 +255,19 @@ func startRedfishEmulator(ctx context.Context, network string, xname string) (te
 }
 
 // loadRedfishEndpoints loads Redfish endpoint information into SMD
-func loadRedfishEndpoints(ctx context.Context, network string, endpoints []string) error {
+func loadRedfishEndpoints(ctx context.Context, network string, endpoints []redfishEndpoint) error {
 	if len(endpoints) == 0 {
 		return nil
 	}
 
 	// Build JSON payload
 	jsonPayload := `{"RedfishEndpoints":[`
-	for i, xname := range endpoints {
+	for i, endpoint := range endpoints {
 		if i > 0 {
 			jsonPayload += ","
 		}
-		jsonPayload += fmt.Sprintf(`{"ID":"%s","FQDN":"%s","RediscoverOnUpdate":true,"User":"root","Password":"root_password"}`,
-			xname, xname)
+		jsonPayload += fmt.Sprintf(`{"ID":"%s","FQDN":"%s","RediscoverOnUpdate":true,"User":"%s","Password":"%s"}`,
+			endpoint.Host, endpoint.Host, endpoint.Username, endpoint.Password)
 	}
 	jsonPayload += `]}`
 

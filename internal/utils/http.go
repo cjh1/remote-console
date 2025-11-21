@@ -52,6 +52,7 @@ func SendJSONError(w http.ResponseWriter, ecode int, message string) {
 	SendResponseJSON(w, httpCode, data)
 }
 
+// TODO do we need this?
 func SendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(sc)

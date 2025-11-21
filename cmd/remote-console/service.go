@@ -104,8 +104,11 @@ func logRotate(config remoteConsoleConfig, conmanService ConmanService, logsServ
 	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logConfig.ConsoleLogsFileSize, logConfig.ConsoleLogsNumRotate)
 	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logConfig.AggLogsFileSize, logConfig.AggLogsNumRotate)
 
+	// conman will add the conman directory, so we point the logs service their
+	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
+
 	// Create the log rotation configuration file
-	logsService.UpdateLogRotateConf(config.Conman.LogsPath, nodes.CurrentNodes())
+	logsService.UpdateLogRotateConf(conmanLogsPath, nodes.CurrentNodes())
 
 	sleepSecs := time.Duration(300) * time.Second
 	logRotCheckFreqSec := logConfig.LogRotateCheckFrequency
@@ -116,7 +119,7 @@ func logRotate(config remoteConsoleConfig, conmanService ConmanService, logsServ
 	}
 
 	for {
-		restartConman := logsService.LogRotate(config.Conman.LogsPath)
+		restartConman := logsService.LogRotate(conmanLogsPath)
 		if restartConman {
 			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
 			conmanService.SignalConmanHUP()
@@ -202,7 +205,10 @@ func runService(config remoteConsoleConfig) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
-	console.SetupRoutes(config.Conman.LogsPath)
+	// Connam will append "conman" to this path for its logs, so we 
+	// need to pass that full path to service monitoring the logs
+	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
+	console.SetupRoutes(conmanLogsPath)
 
 	log.Printf("Spinning up http server...")
 	server := &http.Server{Addr: config.HttpListen, Handler: console.RequestRouter}
