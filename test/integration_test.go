@@ -11,6 +11,8 @@ import (
 	"time"
 	"net/url"
 
+	"strings"
+
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
@@ -24,10 +26,10 @@ import (
 // IntegrationTestSuite is the test suite for remote-console integration tests
 type IntegrationTestSuite struct {
 	suite.Suite
-	ctx           context.Context
-	apiURL        string
-	networks      []*testcontainers.DockerNetwork
-	containers    []testcontainers.Container
+	ctx        context.Context
+	apiURL     string
+	networks   []*testcontainers.DockerNetwork
+	containers map[string]testcontainers.Container
 }
 
 // SetupSuite runs once before all tests in the suite
@@ -37,6 +39,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	}
 
 	s.ctx = context.Background()
+	s.containers = make(map[string]testcontainers.Container)
 
 	// Create networks
 	rcsNet, err := network.New(s.ctx, network.WithCheckDuplicate())
@@ -55,7 +58,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Log("Starting Vault...")
 	vaultContainer, err := startVault(s.ctx, rcsNet.Name, rcsConsoleNet.Name)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, vaultContainer)
+	s.containers["vault"] = vaultContainer
 
 	// Enable KV store in Vault
 	s.T().Log("Enabling KV store in Vault...")
@@ -76,7 +79,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Log("Starting Postgres...")
 	postgresContainer, err := startPostgres(s.ctx, rcsNet.Name)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, postgresContainer)
+	s.containers["postgres"] = postgresContainer
 
 	// Initialize SMD database
 	s.T().Log("Initializing SMD database...")
@@ -87,22 +90,22 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Log("Starting SMD...")
 	smdContainer, err := startSMD(s.ctx, rcsNet.Name, rcsRfNet.Name)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, smdContainer)
+	s.containers["smd"] = smdContainer
 
 	// Start Redfish Emulators
 	s.T().Log("Starting Redfish emulators...")
 	authConfig := "ADMIN:ADMIN:Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
 	rfEmulator0, err := startRedfishEmulator(s.ctx, rcsRfNet.Name, "x0c0s0b0", "ssh", &authConfig)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, rfEmulator0)
+	s.containers["rf-x0c0s0b0"] = rfEmulator0
 
 	rfEmulator1, err := startRedfishEmulator(s.ctx, rcsRfNet.Name, "x0c0s1b0", "ssh", nil)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, rfEmulator1)
+	s.containers["rf-x0c0s1b0"] = rfEmulator1
 
 	rfEmulator2, err := startRedfishEmulator(s.ctx, rcsRfNet.Name, "x0c0s2b0", "ipmi", nil)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, rfEmulator2)
+	s.containers["rf-x0c0s2b0"] = rfEmulator2
 
 	// Load Redfish endpoints into SMD
 	redfishEndpoints := []redfishEndpoint{
@@ -132,7 +135,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Log("Starting SSH password server...")
 	sshPasswordServer, err := startSSHPasswordServer(s.ctx, rcsConsoleNet.Name, "x0c0s0b0", "ADMIN", "ADMIN")
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, sshPasswordServer)
+	s.containers["ssh-password"] = sshPasswordServer
 
 	// Start SSH key server
 	s.T().Log("Starting SSH key server...")
@@ -142,19 +145,19 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	}
 	sshKeyServer, err := startSSHKeyServer(s.ctx, rcsConsoleNet.Name, "x0c0s1b0", "n0", publicKey)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, sshKeyServer)
+	s.containers["ssh-key"] = sshKeyServer
 
 	// Start IPMI server
 	s.T().Log("Starting IPMI server...")
 	ipmiServer, err := startIPMIServer(s.ctx, rcsConsoleNet.Name, "x0c0s2b0")
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, ipmiServer)
+	s.containers["ipmi"] = ipmiServer
 
 	// Build and start remote-console
 	s.T().Log("Starting remote-console...")
 	remoteConsole, err := startRemoteConsole(s.ctx, rcsNet.Name, rcsConsoleNet.Name)
 	require.NoError(s.T(), err)
-	s.containers = append(s.containers, remoteConsole)
+	s.containers["remote-console"] = remoteConsole
 
 	// Get remote-console endpoint
 	host, err := remoteConsole.Host(s.ctx)
@@ -172,10 +175,10 @@ func (s *IntegrationTestSuite) TearDownSuite() {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Clean up containers in reverse order
-	for i := len(s.containers) - 1; i >= 0; i-- {
-		if err := s.containers[i].Terminate(cleanupCtx); err != nil {
-			s.T().Logf("Warning: failed to terminate container: %v", err)
+	// Clean up containers
+	for name, container := range s.containers {
+		if err := container.Terminate(cleanupCtx); err != nil {
+			s.T().Logf("Warning: failed to terminate container %s: %v", name, err)
 		}
 	}
 
@@ -308,19 +311,106 @@ func (s *IntegrationTestSuite) websocketConnect(path string) (*websocket.Conn, *
 }
 
 
+func (s *IntegrationTestSuite) readWebSocketMessages(wsConn *websocket.Conn, timeout time.Duration) string {
+	wsConn.SetReadDeadline(time.Now().Add(timeout))
+
+	var output strings.Builder
+	for {
+		_, message, err := wsConn.ReadMessage()
+		if err != nil {
+			s.T().Logf("WebSocket read ended: %v", err)
+			break
+		}
+		msgStr := string(message)
+		s.T().Logf("Console: %s", msgStr)
+		output.WriteString(msgStr)
+	}
+	return output.String()
+}
+
+func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, searchString string, timeout time.Duration) error {
+	wsConn.SetReadDeadline(time.Now().Add(timeout))
+
+	var output strings.Builder
+	for {
+		_, message, err := wsConn.ReadMessage()
+		if err != nil {
+			s.T().Logf("WebSocket read ended: %v", err)
+			break
+		}
+		msgStr := string(message)
+		s.T().Logf("Console: %s", msgStr)
+		output.WriteString(msgStr)
+		if strings.Contains(msgStr, searchString) {
+			return nil
+		}
+	}
+	return fmt.Errorf("string %q not found in output: %s", searchString, output.String())
+}
+
+
 // TestSSHPasswordConsoleConnection verifies SSH password-based console connection
 func (s *IntegrationTestSuite) TestSSHPasswordConsoleTail() {
-	wsConn, resp, err := s.websocketConnect("/remote-console/consoles/x0c0s0b0/tail")
+	path := "/remote-console/consoles/x0c0s0b0/tail"
+	wsConn, resp, err := s.websocketConnect(path)
 	s.Require().NoError(err)
 	defer resp.Body.Close()
 	defer wsConn.Close()
 
-	// Read a few messages from the console
-	for i := 0; i < 1; i++ {
-		_, message, err := wsConn.ReadMessage()
-		s.Require().NoError(err)
-		s.T().Logf("Received console message: %s", string(message))
+	tailOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
+
+	s.Require().Contains(tailOutput, "Welcome to OpenSSH Server", "Expected to find 'Welcome to OpenSSH Server' in console output")
+
+	msg := "hello console"
+	sshPasswordContainer := s.containers["ssh-password"]
+	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"sh", "-c", fmt.Sprintf("echo '%s' > /dev/pts/0", msg)})
+	s.Require().NoError(err)
+	s.T().Logf("SSH Password container echo to pts (exit code %d): %s", exitCode, output)
+
+	// Connect again to read the message
+	wsConn, resp, err = s.websocketConnect(path)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	tailOutput = s.readWebSocketMessages(wsConn, 30*time.Second)
+	s.Require().Contains(tailOutput, msg, fmt.Sprintf("Expected to find '%s' in console output", msg))
+}
+
+// TestSSHPasswordConsoleTailFollow verifies tail with follow=true for live updates
+func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailFollow() {
+	// Parse the HTTP API URL to get host and port
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err)
+
+	wsURL := url.URL{
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
+		Path:     "/remote-console/consoles/x0c0s0b0/tail",
+		RawQuery: "follow=true",
 	}
+
+	wsConn, resp, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	// Read initial messages until we see the welcome message
+	err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
+	s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
+	s.T().Log("Found welcome message")
+
+	// Send test message to console
+	testMsg := "test-follow-message-67890"
+	sshPasswordContainer := s.containers["ssh-password"]
+	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"sh", "-c", fmt.Sprintf("echo '%s' > /dev/pts/0", testMsg)})
+	s.Require().NoError(err)
+	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
+
+	// Continue reading from the same connection to get the new message
+	err = s.readWebSocketUntil(wsConn, testMsg, 15*time.Second)
+	s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", testMsg))
+	s.T().Log("Found test message in live stream!")
 }
 
 // // TestSSHKeyConsoleConnection verifies SSH key-based console connection

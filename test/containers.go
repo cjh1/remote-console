@@ -302,8 +302,9 @@ func startSSHPasswordServer(ctx context.Context, network string, alias string, u
 			"PASSWORD_ACCESS": "true",
 			"USER_NAME":       username,
 			"USER_PASSWORD":   password,
+			"LISTEN_PORT":       "22",
 		},
-		ExposedPorts: []string{"2222/tcp"},
+		ExposedPorts: []string{"22/tcp"},
 		WaitingFor:   wait.ForLog("done.").WithStartupTimeout(60 * time.Second),
 	}
 
