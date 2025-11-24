@@ -137,6 +137,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	}
 
 	// If numLines is set to a positive number, we start reading from that many lines back
+	numLines = 0
 	if numLines > 0 {
 		conf.Location = &tail.SeekInfo{Offset: int64(-1 * numLines), Whence: io.SeekEnd}
 	}

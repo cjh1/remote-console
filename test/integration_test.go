@@ -335,6 +335,7 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 	for {
 		_, message, err := wsConn.ReadMessage()
 		if err != nil {
+			// TODO this should be an error 
 			s.T().Logf("WebSocket read ended: %v", err)
 			break
 		}
@@ -401,17 +402,77 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailFollow() {
 	s.T().Log("Found welcome message")
 
 	// Send test message to console
-	testMsg := "test-follow-message-67890"
+	testMsg := "follow me"
 	sshPasswordContainer := s.containers["ssh-password"]
-	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"sh", "-c", fmt.Sprintf("echo '%s' > /dev/pts/0", testMsg)})
+	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", testMsg})
 	s.Require().NoError(err)
 	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
 
 	// Continue reading from the same connection to get the new message
-	err = s.readWebSocketUntil(wsConn, testMsg, 15*time.Second)
+	err = s.readWebSocketUntil(wsConn, testMsg, 30*time.Second)
 	s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", testMsg))
 	s.T().Log("Found test message in live stream!")
 }
+
+// TestSSHPasswordConsoleTailLines verifies tail with lines=N for last N lines
+func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLines() {
+	// Parse the HTTP API URL to get host and port
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err)
+
+	// Connect and follow until see see that conman is connected to
+	// the console
+	wsURL := url.URL{
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
+		Path:     "/remote-console/consoles/x0c0s0b0/tail",
+		RawQuery: "follow=true",
+	}
+
+	wsConn, resp, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
+	s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
+
+
+	// Send a test message
+	msg := "only me"
+	sshPasswordContainer := s.containers["ssh-password"]
+	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
+	s.Require().NoError(err)
+	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
+
+	// Now connect again to read last line
+	wsURL = url.URL{
+		Scheme:   "ws",
+		Host:     parsedURL.Host,	
+		Path:     "/remote-console/consoles/x0c0s0b0/tail",
+		RawQuery: "lines=1",
+	}
+
+	wsConn, resp, err = websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	tailOutput := s.readWebSocketMessages(wsConn, 30*time.Minute)
+
+	// We expect to see one line, split on newlines
+	lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
+
+	fmt.Println("Tail output lines:")	
+	for _, line := range lines {
+		fmt.Printf(">> %s\n", line)
+	}
+
+	s.Require().Len(lines, 1, "Expected exactly one line from tail with lines=1")
+
+	s.Require().Contains(lines[0], msg, "Test message not found in console output")
+}
+
 
 // // TestSSHKeyConsoleConnection verifies SSH key-based console connection
 // func (s *IntegrationTestSuite) TestSSHKeyConsoleConnection() {

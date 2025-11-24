@@ -306,6 +306,13 @@ func startSSHPasswordServer(ctx context.Context, network string, alias string, u
 		},
 		ExposedPorts: []string{"22/tcp"},
 		WaitingFor:   wait.ForLog("done.").WithStartupTimeout(60 * time.Second),
+		Files: []testcontainers.ContainerFile{
+			{
+				HostFilePath:      "broadcast.sh",
+				ContainerFilePath: "/usr/local/bin/broadcast.sh",
+				FileMode:          0755,	
+			},
+		},
 	}
 
 	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
