@@ -1,11 +1,14 @@
 package console
 
 import (
+	"bufio"
+	"container/ring"
 	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/gorilla/websocket"
@@ -93,7 +96,8 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 			cts.tail.Stop()
 			return
 		case line := <-cts.tail.Lines:
-			log.Printf("got line")
+			log.Printf("got line: %v", line)
+
 			// Stream the line to the websocket
 			if line == nil {
 				log.Printf("Tailing console for '%s' complete", cts.nodeID)
@@ -121,7 +125,89 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 	}
 }
 
+// readLastNLines reads the last numLines lines from the specified file and returns them along with the file position
+func readLastNLines(filename string, numLines int) ([]string, int64, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	r := ring.New(numLines)
+	count := 0
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		r.Value = scanner.Text()
+		r = r.Next()
+		count++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error reading file: %w", err)
+	}
+
+	// Get current position in file (where we stopped reading)
+	currentPos, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get file position: %w", err)
+	}
+
+	// Return lines in order
+	var lines []string
+	linesToReturn := numLines
+	if count < numLines {
+		linesToReturn = count
+		// Move back to start of actual data
+		r = r.Move(-count)
+	}
+
+	// Iterate the ring to get the lines
+	for i := 0; i < linesToReturn; i++ {
+		if r.Value != nil {
+			lines = append(lines, r.Value.(string))
+		}
+		r = r.Next()
+	}
+
+	return lines, currentPos, nil
+}
+
 func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
+
+	fmt.Printf("Starting to tail console log for node: %s, follow=%v, numLines=%d\n", cts.nodeID, follow, numLines)
+
+	filename := fmt.Sprintf("%s/console.%s", cts.consoleLogsPath, cts.nodeID)
+
+	var seekOffset int64
+	// If numLines is specified, send last N lines first
+	if numLines > 0 {
+		lines, currentPos, err := readLastNLines(filename, numLines)
+		if err != nil {
+			log.Printf("Failed to read last %d lines from %s: %v", numLines, filename, err)
+			cts.conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error reading console log"))
+			cts.conn.Close()
+			return
+		}
+
+		for _, line := range lines {
+			if err := cts.conn.WriteMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
+				log.Printf("Failed to send lines: %v", err)
+				cts.conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error sending console log"))
+				cts.conn.Close()
+				return
+			}
+		}
+
+		seekOffset = currentPos
+
+		// If not following, we're done
+		if !follow {
+			return
+		}
+	}
 
 	// Configuration for tail function
 	conf := tail.Config{
@@ -133,16 +219,16 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
 	// Only set ReOpen to true if we are following the file
 	if follow {
-		conf.ReOpen = true // If the files is deleted or moved, reopen original file
+		conf.ReOpen = true // If the file is deleted or moved, reopen original file
 	}
 
-	// If numLines is set to a positive number, we start reading from that many lines back
-	numLines = 0
-	if numLines > 0 {
-		conf.Location = &tail.SeekInfo{Offset: int64(-1 * numLines), Whence: io.SeekEnd}
+	// When following after sending last N lines, start from where we left off
+	// The tail library will handle rotation: if file is reopened, it starts from beginning
+	// If the file hasn't been rotated, we continue from our saved offset
+	if numLines > 0 && follow && seekOffset > 0 {
+		conf.Location = &tail.SeekInfo{Offset: seekOffset, Whence: io.SeekStart}
 	}
 
-	filename := fmt.Sprintf("%s/console.%s", cts.consoleLogsPath, cts.nodeID)
 	var err error
 	cts.tail, err = tail.TailFile(filename, conf)
 	if err != nil {
@@ -183,7 +269,7 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 
 	// Make sure we are monitoring a valid node
 	if exists := validateNode(nodeID); !exists {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
 

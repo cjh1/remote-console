@@ -281,11 +281,24 @@ func loadRedfishEndpoints(ctx context.Context, network string, endpoints []redfi
 		WaitingFor: wait.ForExit().WithExitTimeout(60 * time.Second),
 	}
 
-	_, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Check the exit code
+	state, err := container.State(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get container state: %w", err)
+	}
+	if state.ExitCode != 0 {
+		return fmt.Errorf("failed to load Redfish endpoints: container exited with code %d", state.ExitCode)
+	}
+
+	return nil
 }
 
 // startSSHPasswordServer starts an SSH server with password authentication
