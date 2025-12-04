@@ -85,6 +85,7 @@ func (cts *consoleTailSession) waitForClientClose() {
 }
 
 func (cts *consoleTailSession) streamConsoleTail(follow bool) {
+	fmt.Printf("streamConsoleTail called for node: %s, follow=%v\n", cts.nodeID, follow)
 	// Read the lines of the tail output while looking for a cancel signal
 	for {
 		select {
@@ -111,6 +112,7 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 			// Add newline back (tail library strips it)
 			lineText := line.Text + "\n"
 			log.Printf("before write")
+			log.Printf("Sending line: %s", lineText)
 			err := cts.conn.WriteMessage(websocket.TextMessage, []byte(lineText))
 			log.Printf("after write")
 			if err != nil {
@@ -182,7 +184,11 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	var seekOffset int64
 	// If numLines is specified, send last N lines first
 	if numLines > 0 {
+		fmt.Printf("Reading last %d lines from console log: %s\n", numLines, filename)
 		lines, currentPos, err := readLastNLines(filename, numLines)
+		fmt.Printf("Read %d lines from console log\n", len(lines))
+		fmt.Printf("CurrentPos=%d\n", currentPos)
+
 		if err != nil {
 			log.Printf("Failed to read last %d lines from %s: %v", numLines, filename, err)
 			cts.conn.WriteMessage(websocket.CloseMessage,
@@ -192,6 +198,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		}
 
 		for _, line := range lines {
+			fmt.Printf("Sending line: %s\n", line)
 			if err := cts.conn.WriteMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
 				log.Printf("Failed to send lines: %v", err)
 				cts.conn.WriteMessage(websocket.CloseMessage,
@@ -205,6 +212,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
 		// If not following, we're done
 		if !follow {
+			fmt.Printf("Not following console log, ending session\n")
 			return
 		}
 	}
@@ -225,9 +233,14 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	// When following after sending last N lines, start from where we left off
 	// The tail library will handle rotation: if file is reopened, it starts from beginning
 	// If the file hasn't been rotated, we continue from our saved offset
+
+	fmt.Printf("seekOffset=%d", seekOffset)
+
 	if numLines > 0 && follow && seekOffset > 0 {
 		conf.Location = &tail.SeekInfo{Offset: seekOffset, Whence: io.SeekStart}
 	}
+
+
 
 	var err error
 	cts.tail, err = tail.TailFile(filename, conf)

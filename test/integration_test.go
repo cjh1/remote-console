@@ -328,7 +328,7 @@ func (s *IntegrationTestSuite) readWebSocketMessages(wsConn *websocket.Conn, tim
 	return output.String()
 }
 
-func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, searchString string, timeout time.Duration) error {
+func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, searchString string, timeout time.Duration) (string, error) {
 	wsConn.SetReadDeadline(time.Now().Add(timeout))
 
 	var output strings.Builder
@@ -343,10 +343,10 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 		s.T().Logf("Console: %s", msgStr)
 		output.WriteString(msgStr)
 		if strings.Contains(msgStr, searchString) {
-			return nil
+			return output.String(), nil
 		}
 	}
-	return fmt.Errorf("string %q not found in output: %s", searchString, output.String())
+	return output.String(), fmt.Errorf("string %q not found in output", searchString)
 }
 
 
@@ -397,7 +397,7 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailFollow() {
 	defer wsConn.Close()
 
 	// Read initial messages until we see the welcome message
-	err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
+	_, err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
 	s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
 	s.T().Log("Found welcome message")
 
@@ -409,7 +409,7 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailFollow() {
 	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
 
 	// Continue reading from the same connection to get the new message
-	err = s.readWebSocketUntil(wsConn, testMsg, 30*time.Second)
+	_, err = s.readWebSocketUntil(wsConn, testMsg, 30*time.Second)
 	s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", testMsg))
 	s.T().Log("Found test message in live stream!")
 }
@@ -434,7 +434,7 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLines() {
 	defer resp.Body.Close()
 	defer wsConn.Close()
 
-	err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
+	_, err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
 	s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
 
 
@@ -488,12 +488,14 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLinesFollow() {
 		RawQuery: "follow=true",
 	}
 
+	fmt.Println("Connecting to WebSocket for tail with follow=true")
+
 	wsConn, resp, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 	s.Require().NoError(err)
 	defer resp.Body.Close()
 	defer wsConn.Close()
 
-	err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
+	_, err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", 30*time.Second)
 	s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
 
 
@@ -512,12 +514,15 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLinesFollow() {
 		RawQuery: "lines=1&follow=true",
 	}
 
+	fmt.Println("Connecting to WebSocket for tail with lines=1&follow=true")
+
 	wsConn, resp, err = websocket.DefaultDialer.Dial(wsURL.String(), nil)
 	s.Require().NoError(err)
 	defer resp.Body.Close()
 	defer wsConn.Close()
 
-	tailOutput := s.readWebSocketMessages(wsConn, 30*time.Minute)
+	tailOutput, err := s.readWebSocketUntil(wsConn, msg, 30*time.Minute)
+	s.Require().NoError(err, "Expected to find initial test message in tail output")
 
 	// We expect to see one line, split on newlines
 	lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
@@ -537,13 +542,15 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLinesFollow() {
 	s.Require().NoError(err)
 	s.T().Logf("Sent follow-up message to console (exit code %d): %s", exitCode, output)
 
+	fmt.Printf("Starting read until")
+
 	// Continue reading from the same connection to get the new message
-	err = s.readWebSocketUntil(wsConn, followMsg, 30*time.Second)
+	tailOutput, err = s.readWebSocketUntil(wsConn, followMsg, 200*time.Second)
 	s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", followMsg))
+	lines = strings.Split(strings.TrimSpace(tailOutput), "\n")
+	s.Require().Len(lines, 1, "Expected exactly one line from tail with follow after sending follow-up message")
 	s.T().Log("Found follow-up message in live stream!")
 }
-
-
 
 
 // // TestSSHKeyConsoleConnection verifies SSH key-based console connection

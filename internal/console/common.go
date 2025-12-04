@@ -28,11 +28,9 @@ func keepAlive(ctx context.Context, conn *websocket.Conn) {
 	for {
 		select {
 		case <-ticker.C:
-			fmt.Println("write")
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
-			fmt.Println("after write")
 		case <-ctx.Done():
 			fmt.Println("done")
 			return
