@@ -122,6 +122,7 @@ func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
 			}
 
 			if n > 0 {
+				log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
 				if err := s.conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
 					// Don't log if WebSocket is already closed (happens during normal shutdown)
 					if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) &&
