@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,18 +13,17 @@ import (
 )
 
 type redfishEndpoint struct {
-	Host	 string 
-	Username string 
-	Password string 
+	Host     string
+	Username string
+	Password string
 }
-
 
 // startVault starts a Vault container with development mode enabled
 func startVault(ctx context.Context, networks ...string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
-		Image:    "docker.io/library/vault:1.5.5",
-		Hostname: "vault",
-		Networks: networks,
+		Image:          "docker.io/library/vault:1.5.5",
+		Hostname:       "vault",
+		Networks:       networks,
 		NetworkAliases: map[string][]string{},
 		Env: map[string]string{
 			"VAULT_DEV_ROOT_TOKEN_ID":  "hms",
@@ -155,9 +155,9 @@ func initSMDDatabase(ctx context.Context, network string) error {
 // startSMD starts the State Management Database service
 func startSMD(ctx context.Context, networks ...string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
-		Image:    "docker.io/openchami/smd:rf",
-		Hostname: "smd",
-		Networks: networks,
+		Image:          "docker.io/openchami/smd:rf",
+		Hostname:       "smd",
+		Networks:       networks,
 		NetworkAliases: map[string][]string{},
 		Env: map[string]string{
 			"SMD_DBHOST":           "postgres",
@@ -209,11 +209,11 @@ func startSMD(ctx context.Context, networks ...string) (testcontainers.Container
 // startRedfishEmulator starts a Redfish emulator for a specific xname
 func startRedfishEmulator(ctx context.Context, network string, xname string, mock string, authConfig *string) (testcontainers.Container, error) {
 	env := map[string]string{
-			"MOCKUPFOLDER": mock,
-			"MAC_SCHEMA":   "Mountain",
-			"XNAME":        xname,
-			"PORT":         "443",
-		}
+		"MOCKUPFOLDER": mock,
+		"MAC_SCHEMA":   "Mountain",
+		"XNAME":        xname,
+		"PORT":         "443",
+	}
 
 	if authConfig != nil {
 		env["AUTH_CONFIG"] = *authConfig
@@ -224,7 +224,6 @@ func startRedfishEmulator(ctx context.Context, network string, xname string, moc
 		return nil, fmt.Errorf("unable to determine absolute path for mocks directory: %w", err)
 	}
 
-	
 	fmt.Printf("Using mocks directory: %s\n", mocksDirectory)
 
 	req := testcontainers.ContainerRequest{
@@ -234,16 +233,16 @@ func startRedfishEmulator(ctx context.Context, network string, xname string, moc
 		NetworkAliases: map[string][]string{
 			network: {xname},
 		},
-		Env: env,
+		Env:        env,
 		WaitingFor: wait.ForLog("Running on all addresses").WithStartupTimeout(60 * time.Second),
 		Files: []testcontainers.ContainerFile{
 			{
 				HostFilePath:      filepath.Join(mocksDirectory, "ssh"),
-				ContainerFilePath: "/app/api_emulator/redfish/static/",	
+				ContainerFilePath: "/app/api_emulator/redfish/static/",
 			},
 			{
 				HostFilePath:      filepath.Join(mocksDirectory, "ipmi"),
-				ContainerFilePath: "/app/api_emulator/redfish/static/",	
+				ContainerFilePath: "/app/api_emulator/redfish/static/",
 			},
 		},
 	}
@@ -305,6 +304,7 @@ func loadRedfishEndpoints(ctx context.Context, network string, endpoints []redfi
 func startSSHPasswordServer(ctx context.Context, network string, alias string, username string, password string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		Image:    "linuxserver/openssh-server:latest",
+		Hostname: alias,
 		Networks: []string{network},
 		NetworkAliases: map[string][]string{
 			network: {alias},
@@ -315,7 +315,7 @@ func startSSHPasswordServer(ctx context.Context, network string, alias string, u
 			"PASSWORD_ACCESS": "true",
 			"USER_NAME":       username,
 			"USER_PASSWORD":   password,
-			"LISTEN_PORT":       "22",
+			"LISTEN_PORT":     "22",
 		},
 		ExposedPorts: []string{"22/tcp"},
 		WaitingFor:   wait.ForLog("done.").WithStartupTimeout(60 * time.Second),
@@ -323,7 +323,7 @@ func startSSHPasswordServer(ctx context.Context, network string, alias string, u
 			{
 				HostFilePath:      "broadcast.sh",
 				ContainerFilePath: "/usr/local/bin/broadcast.sh",
-				FileMode:          0755,	
+				FileMode:          0755,
 			},
 		},
 	}
@@ -338,6 +338,7 @@ func startSSHPasswordServer(ctx context.Context, network string, alias string, u
 func startSSHKeyServer(ctx context.Context, network string, alias string, username string, publicKey string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		Image:    "linuxserver/openssh-server:latest",
+		Hostname: alias,
 		Networks: []string{network},
 		NetworkAliases: map[string][]string{
 			network: {alias},
@@ -386,7 +387,7 @@ func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers
 			Context:    "..",
 			Dockerfile: "Dockerfile",
 		},
-		Networks: networks,
+		Networks:       networks,
 		NetworkAliases: map[string][]string{},
 		Files: []testcontainers.ContainerFile{
 			{
@@ -401,23 +402,27 @@ func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers
 			},
 		},
 		Env: map[string]string{
-			"RCS_SMD_URL":			   "http://smd:27779",
-			"SMS_SERVER":           "http://smd:27779",
-			"CRAY_VAULT_AUTH_PATH": "auth/token/create",
-			"CRAY_VAULT_ROLE_FILE": "/app/configs/namespace",
-			"CRAY_VAULT_JWT_FILE":  "/app/configs/token",
-			"VAULT_ADDR":           "http://vault:8200",
-			"VAULT_TOKEN":          "hms",
-			"VAULT_BASE_PATH":      "hms-creds",
-			"VAULT_SKIP_VERIFY":    "true",
-			"VAULT_ENABLED":        "true",
-			"LOG_LEVEL":            "DEBUG",
-			"RCS_CONMAN_PID_FILE_PATH":    "/app/remote-console.pid",
-			"RCS_CONMAN_LOGS_PATH":    "/tmp",
-
+			"RCS_SMD_URL":              "http://smd:27779",
+			"SMS_SERVER":               "http://smd:27779",
+			"CRAY_VAULT_AUTH_PATH":     "auth/token/create",
+			"CRAY_VAULT_ROLE_FILE":     "/app/configs/namespace",
+			"CRAY_VAULT_JWT_FILE":      "/app/configs/token",
+			"VAULT_ADDR":               "http://vault:8200",
+			"VAULT_TOKEN":              "hms",
+			"VAULT_BASE_PATH":          "hms-creds",
+			"VAULT_SKIP_VERIFY":        "true",
+			"VAULT_ENABLED":            "true",
+			"LOG_LEVEL":                "DEBUG",
+			"RCS_CONMAN_PID_FILE_PATH": "/app/remote-console.pid",
+			"RCS_CONMAN_LOGS_PATH":     "/tmp",
 		},
 		ExposedPorts: []string{"26776/tcp"},
-		WaitingFor:   wait.ForLog("Listening on port 7890").WithStartupTimeout(120 * time.Second),
+		WaitingFor: wait.ForHTTP("/remote-console/readiness").
+			WithPort("26776/tcp").
+			WithStatusCodeMatcher(func(status int) bool {
+				return status == http.StatusNoContent
+			}).
+			WithStartupTimeout(120 * time.Second),
 	}
 
 	for _, network := range networks {

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
-	"path/filepath"
 
 	compcreds "github.com/Cray-HPE/hms-compcredentials"
 	"github.com/OpenCHAMI/remote-console/internal/conman"
@@ -205,7 +205,7 @@ func runService(config remoteConsoleConfig) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
-	// Connam will append "conman" to this path for its logs, so we 
+	// Conman will append "conman" to this path for its logs, so we
 	// need to pass that full path to service monitoring the logs
 	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
 	console.SetupRoutes(conmanLogsPath)
@@ -225,8 +225,8 @@ func runService(config remoteConsoleConfig) error {
 
 	// Listen for syscall signals for process to interrupt/quit
 	go func() {
-		inShutdown = true
 		sig := <-sigs
+		inShutdown = true
 		log.Printf("Info: Detected signal to close service: %s", sig)
 
 		// Shutdown signal with grace period of 30 seconds

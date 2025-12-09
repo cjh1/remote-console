@@ -1,0 +1,110 @@
+package console
+
+import (
+	"context"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+const (
+	writeWait  = 10 * time.Second
+	pongWait   = 60 * time.Second
+	pingPeriod = 30 * time.Second
+)
+
+type webSockMessage struct {
+	messageType int
+	data        []byte
+}
+
+type webSocketSession struct {
+	conn      *websocket.Conn
+	send      chan webSockMessage
+	closeOnce sync.Once
+	name      string
+	onClose   func()
+}
+
+func newWebSocketSession(conn *websocket.Conn, name string, onClose func()) *webSocketSession {
+	return &webSocketSession{
+		conn:    conn,
+		send:    make(chan webSockMessage, 64),
+		name:    name,
+		onClose: onClose,
+	}
+}
+
+func (ws *webSocketSession) start(ctx context.Context) {
+	go ws.writePump(ctx)
+}
+
+func (ws *webSocketSession) configureReadDeadlines() {
+	ws.conn.SetReadDeadline(time.Now().Add(pongWait))
+	ws.conn.SetPongHandler(func(string) error {
+		ws.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+}
+
+func (ws *webSocketSession) readMessage() (int, []byte, error) {
+	return ws.conn.ReadMessage()
+}
+
+func (ws *webSocketSession) write(ctx context.Context, messageType int, data []byte) error {
+	payload := append([]byte(nil), data...)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case ws.send <- webSockMessage{messageType: messageType, data: payload}:
+		return nil
+	}
+}
+
+func (ws *webSocketSession) close() {
+	ws.closeOnce.Do(func() {
+		close(ws.send)
+	})
+}
+
+func (ws *webSocketSession) writePump(ctx context.Context) {
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+	defer ws.conn.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			ws.conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			return
+		case msg, ok := <-ws.send:
+			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				ws.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
+				log.Printf("WebSocket write failed for %s: %v", ws.name, err)
+				ws.handleClose()
+				return
+			}
+		case <-ticker.C:
+			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("WebSocket ping failed for %s: %v", ws.name, err)
+				ws.handleClose()
+				return
+			}
+		}
+	}
+}
+
+func (ws *webSocketSession) handleClose() {
+	if ws.onClose != nil {
+		ws.onClose()
+	}
+}
