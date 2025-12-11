@@ -624,6 +624,35 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 
 }
 
+func (s *IntegrationTestSuite) TestConsoleRemoval() {
+	targetNode := "x0c0s1b0"
+	s.T().Logf("Removing console %s from SMD", targetNode)
+
+	err := deleteRedfishEndpoint(s.ctx, s.rfNetwork.Name, targetNode)
+	s.Require().NoError(err, "failed to delete Redfish endpoint for %s", targetNode)
+
+	s.Require().NoError(s.waitForConsoleRemoval(targetNode, 3*time.Minute), "remote-console did not remove console %s", targetNode)
+
+	s.T().Log("Verifying console is no longer reachable")
+	conn, resp, err := s.connectInteractiveConsole(targetNode, 30*time.Second)
+	if conn != nil {
+		conn.Close()
+	}
+	if resp != nil {
+		resp.Body.Close()
+	}
+	s.Require().Error(err, "expected interactive console connection to fail after removal")
+
+	s.T().Log("Re-registering console in SMD")
+	reAddErr := loadRedfishEndpoints(s.ctx, s.rfNetwork.Name, []redfishEndpoint{{
+		Host:     targetNode,
+		Username: "operator",
+		Password: "operator_password",
+	}})
+	s.Require().NoError(reAddErr, "failed to re-register console %s", targetNode)
+	s.Require().NoError(s.waitForConsoleID(targetNode, 3*time.Minute), "remote-console did not rediscover console %s", targetNode)
+}
+
 // TestSSHPasswordConsoleTailLines verifies tail with lines=N for last N lines
 func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLines() {
 	// Parse the HTTP API URL to get host and port
