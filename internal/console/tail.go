@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"container/ring"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -192,30 +193,38 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		fmt.Printf("Read %d lines from console log\n", len(lines))
 		fmt.Printf("CurrentPos=%d\n", currentPos)
 
-		if err != nil {
+		if err == nil {
+			for _, line := range lines {
+				fmt.Printf("Sending line: %s\n", line)
+				if err := cts.writeMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
+					log.Printf("Failed to send lines: %v", err)
+					cts.writeMessage(websocket.CloseMessage,
+						websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error sending console log"))
+					cts.close()
+					return
+				}
+			}
+
+			seekOffset = currentPos
+
+			// If not following, we're done
+			if !follow {
+				fmt.Printf("Not following console log, ending session\n")
+				return
+			}
+		} else if errors.Is(err, os.ErrNotExist) {
+			log.Printf("Console log %s not found; no history available (follow=%v)", filename, follow)
+			if !follow {
+				cts.writeMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Console log not available yet"))
+				cts.close()
+				return
+			}
+		} else {
 			log.Printf("Failed to read last %d lines from %s: %v", numLines, filename, err)
 			cts.writeMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error reading console log"))
 			cts.close()
-			return
-		}
-
-		for _, line := range lines {
-			fmt.Printf("Sending line: %s\n", line)
-			if err := cts.writeMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
-				log.Printf("Failed to send lines: %v", err)
-				cts.writeMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error sending console log"))
-				cts.close()
-				return
-			}
-		}
-
-		seekOffset = currentPos
-
-		// If not following, we're done
-		if !follow {
-			fmt.Printf("Not following console log, ending session\n")
 			return
 		}
 	}

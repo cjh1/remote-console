@@ -599,6 +599,53 @@ func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
 	s.Require().NoError(err, "second follow connection did not see broadcast message")
 }
 
+func (s *IntegrationTestSuite) TestConsoleTailHistoryFollowConcurrent() {
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err)
+
+	historyFollowURL := url.URL{
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
+		Path:     "/remote-console/consoles/x0c0s0b0/tail",
+		RawQuery: "lines=50&follow=true",
+	}
+
+	followURL := url.URL{
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
+		Path:     "/remote-console/consoles/x0c0s0b0/tail",
+		RawQuery: "follow=true",
+	}
+
+	historyConn, historyResp, err := s.dialWebSocket(historyFollowURL)
+	s.Require().NoError(err)
+	defer historyResp.Body.Close()
+	defer historyConn.Close()
+
+	followConn, followResp, err := s.dialWebSocket(followURL)
+	s.Require().NoError(err)
+	defer followResp.Body.Close()
+	defer followConn.Close()
+
+	_, err = s.readWebSocketUntil(historyConn, "Welcome to OpenSSH Server", tailMessageTimeout)
+	s.Require().NoError(err, "history+follow connection did not see welcome message")
+
+	_, err = s.readWebSocketUntil(followConn, "Welcome to OpenSSH Server", tailMessageTimeout)
+	s.Require().NoError(err, "follow-only connection did not see welcome message")
+
+	msg := uniqueMessage("tail-history-follow")
+	sshPasswordContainer := s.containers["ssh-password"]
+	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
+	s.Require().NoError(err)
+	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
+
+	_, err = s.readWebSocketUntil(historyConn, msg, 30*time.Second)
+	s.Require().NoError(err, "history+follow connection did not see broadcast message")
+
+	_, err = s.readWebSocketUntil(followConn, msg, 30*time.Second)
+	s.Require().NoError(err, "follow-only connection did not see broadcast message while history+follow connection was active")
+}
+
 func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 	newNodeID := dynamicTestXname
 
