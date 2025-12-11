@@ -74,28 +74,28 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 	wsConn.SetReadDeadline(time.Now().Add(totalTimeout))
 	defer wsConn.SetReadDeadline(time.Time{})
 
-	const keepAliveInterval = 5 * time.Second
-	ticker := time.NewTicker(keepAliveInterval)
-	defer ticker.Stop()
+	// const keepAliveInterval = 5 * time.Second
+	// ticker := time.NewTicker(keepAliveInterval)
+	// defer ticker.Stop()
 
-	done := make(chan struct{})
-	defer close(done)
+	// done := make(chan struct{})
+	// defer close(done)
 
 	// Send periodic newlines to keep the console session active
-	go func() {
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				s.T().Log("Console idle, sending newline to trigger prompt")
-				if err := wsConn.WriteMessage(websocket.TextMessage, []byte("\n")); err != nil {
-					s.T().Logf("Failed to send keepalive newline: %v", err)
-					return
-				}
-			}
-		}
-	}()
+	// go func() {
+	// 	for {
+	// 		select {
+	// 		case <-done:
+	// 			return
+	// 		case <-ticker.C:
+	// 			s.T().Log("Console idle, sending newline to trigger prompt")
+	// 			if err := wsConn.WriteMessage(websocket.TextMessage, []byte("\n")); err != nil {
+	// 				s.T().Logf("Failed to send keepalive newline: %v", err)
+	// 				return
+	// 			}
+	// 		}
+	// 	}
+	// }()
 
 	var output strings.Builder
 
@@ -110,9 +110,17 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 		output.WriteString(msgStr)
 		if strings.Contains(output.String(), searchString) {
 			return output.String(), nil
+		} else {
+			if err := wsConn.WriteMessage(websocket.TextMessage, []byte("\n")); err != nil {
+				s.T().Logf("Failed to send keepalive newline: %v", err)
+				return "", fmt.Errorf("waiting for prompt: %w", err)
+			}
+			// Sleep briefly to allow console to respond
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
 }
+
 
 func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptTimeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	parsedURL, err := url.Parse(s.apiURL)
