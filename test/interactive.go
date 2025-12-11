@@ -74,32 +74,17 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 	wsConn.SetReadDeadline(time.Now().Add(totalTimeout))
 	defer wsConn.SetReadDeadline(time.Time{})
 
-	// const keepAliveInterval = 5 * time.Second
-	// ticker := time.NewTicker(keepAliveInterval)
-	// defer ticker.Stop()
-
-	// done := make(chan struct{})
-	// defer close(done)
-
-	// Send periodic newlines to keep the console session active
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-done:
-	// 			return
-	// 		case <-ticker.C:
-	// 			s.T().Log("Console idle, sending newline to trigger prompt")
-	// 			if err := wsConn.WriteMessage(websocket.TextMessage, []byte("\n")); err != nil {
-	// 				s.T().Logf("Failed to send keepalive newline: %v", err)
-	// 				return
-	// 			}
-	// 		}
-	// 	}
-	// }()
-
 	var output strings.Builder
 
 	for {
+
+		if err := wsConn.WriteMessage(websocket.TextMessage, []byte("\n")); err != nil {
+			s.T().Logf("Failed to send keepalive newline: %v", err)
+			return "", fmt.Errorf("waiting for prompt: %w", err)
+		}
+		// Sleep briefly to allow console to respond
+		time.Sleep(500 * time.Millisecond)
+
 		_, message, err := wsConn.ReadMessage()
 		if err != nil {
 			return output.String(), fmt.Errorf("waiting for prompt: %w", err)
@@ -110,14 +95,7 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 		output.WriteString(msgStr)
 		if strings.Contains(output.String(), searchString) {
 			return output.String(), nil
-		} else {
-			if err := wsConn.WriteMessage(websocket.TextMessage, []byte("\n")); err != nil {
-				s.T().Logf("Failed to send keepalive newline: %v", err)
-				return "", fmt.Errorf("waiting for prompt: %w", err)
-			}
-			// Sleep briefly to allow console to respond
-			time.Sleep(500 * time.Millisecond)
-		}
+		} 
 	}
 }
 
@@ -136,6 +114,8 @@ func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptTi
 
 	var lastErr error
 
+	// We try multiple times to connect to the console, as it may take a bit for conmand to be available.
+	// TODO we should update this to be more deterministic way to know when the console is ready.
 	for attempt := 1; attempt <= consoleConnectAttempts; attempt++ {
 		s.T().Logf("Connecting to console %s (attempt %d/%d)", nodeID, attempt, consoleConnectAttempts)
 
@@ -143,15 +123,6 @@ func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptTi
 		if err != nil {
 			lastErr = fmt.Errorf("websocket dial: %w", err)
 			s.T().Logf("Console dial attempt %d/%d failed: %v", attempt, consoleConnectAttempts, err)
-			time.Sleep(consoleRetryDelay)
-			continue
-		}
-
-		if err := wsConn.WriteMessage(websocket.TextMessage, []byte("\n")); err != nil {
-			resp.Body.Close()
-			wsConn.Close()
-			lastErr = fmt.Errorf("send initial newline: %w", err)
-			s.T().Logf("Console newline attempt %d/%d failed: %v", attempt, consoleConnectAttempts, err)
 			time.Sleep(consoleRetryDelay)
 			continue
 		}
