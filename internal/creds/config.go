@@ -30,4 +30,3 @@ func DefaultCredsConfig() CredsConfig {
 		SecureStoragePasswordsPath: "hms-creds",
 	}
 }
-

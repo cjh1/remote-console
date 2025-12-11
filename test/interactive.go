@@ -95,10 +95,9 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 		output.WriteString(msgStr)
 		if strings.Contains(output.String(), searchString) {
 			return output.String(), nil
-		} 
+		}
 	}
 }
-
 
 func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptTimeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	parsedURL, err := url.Parse(s.apiURL)

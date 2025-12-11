@@ -47,12 +47,12 @@ type componentEndpoints struct {
 // TODO do we in need to take into account ManagedBy information?
 // componentEndpoint represents SMD component endpoint
 type componentEndpoint struct {
-	ID                 string              `json:"ID"`
-	Type               string              `json:"Type"`
-	Enabled            bool                `json:"Enabled,omitempty"`
+	ID                  string              `json:"ID"`
+	Type                string              `json:"Type"`
+	Enabled             bool                `json:"Enabled,omitempty"`
 	RedfishEndpointFQDN string              `json:"RedfishEndpointFQDN,omitempty"`
-	RedfishSystemInfo  *redfishSystemInfo  `json:"RedfishSystemInfo,omitempty"`
-	RedfishManagerInfo *redfishManagerInfo `json:"RedfishManagerInfo,omitempty"`
+	RedfishSystemInfo   *redfishSystemInfo  `json:"RedfishSystemInfo,omitempty"`
+	RedfishManagerInfo  *redfishManagerInfo `json:"RedfishManagerInfo,omitempty"`
 }
 
 // redfishSystemInfo contains computer system information
@@ -72,9 +72,8 @@ type serialConsole struct {
 	MaxConcurrentSessions int                 `json:"MaxConcurrentSessions,omitempty"`
 	SSH                   *consoleServiceInfo `json:"SSH,omitempty"`
 	IPMI                  *consoleServiceInfo `json:"IPMI,omitempty"`
-	Telnet             *consoleServiceInfo `json:"Telnet,omitempty"`
-	WebSocket     *webSocketConsole `json:"WebSocket,omitempty"`
-
+	Telnet                *consoleServiceInfo `json:"Telnet,omitempty"`
+	WebSocket             *webSocketConsole   `json:"WebSocket,omitempty"`
 }
 
 // commandShell describes the command shell capabilities
@@ -86,20 +85,18 @@ type commandShell struct {
 
 // consoleServiceInfo indicates if a console service is enabled
 type consoleServiceInfo struct {
-	ServiceEnabled bool `json:"ServiceEnabled,omitempty"`
-	Port		   int  `json:"Port,omitempty"`
+	ServiceEnabled        bool   `json:"ServiceEnabled,omitempty"`
+	Port                  int    `json:"Port,omitempty"`
 	HotKeySequenceDisplay string `json:"HotKeySequenceDisplay,omitempty"`
-    SharedWithManagerCLI bool `json:"SharedWithManagerCLI,omitempty"`
-	ConsoleEntryCommand string `json:"ConsoleEntryCommand,omitempty"`
+	SharedWithManagerCLI  bool   `json:"SharedWithManagerCLI,omitempty"`
+	ConsoleEntryCommand   string `json:"ConsoleEntryCommand,omitempty"`
 }
 
 type webSocketConsole struct {
-	ServiceEnabled bool `json:"ServiceEnabled"`
-	Interactive bool `json:"Interactive"`
-	ConsoleURI string `json:"ConsoleURI"`
+	ServiceEnabled bool   `json:"ServiceEnabled"`
+	Interactive    bool   `json:"Interactive"`
+	ConsoleURI     string `json:"ConsoleURI"`
 }
-
-
 
 var hardwareUpdateTime string = "Unknown"
 
@@ -114,7 +111,6 @@ var currentNodes map[string]*NodeConsoleInfo = make(map[string]*NodeConsoleInfo)
 type NodeInfoAdapter struct {
 	*NodeConsoleInfo
 }
-
 
 // redfishEndpoint holds HSM redfish endpoint information
 type redfishEndpoint struct {
@@ -178,23 +174,22 @@ func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo
 	switch {
 	case sc.SSH != nil && sc.SSH.ServiceEnabled:
 		return &NodeConsoleInfo{
-			ID:       endpoint.ID,
+			ID:             endpoint.ID,
 			ConnectionType: SSH,
 			ConnectionHost: endpoint.RedfishEndpointFQDN,
 			ConnectionPort: sc.SSH.Port,
 		}
 	case sc.IPMI != nil && sc.IPMI.ServiceEnabled:
 		return &NodeConsoleInfo{
-			ID:       endpoint.ID,
+			ID:             endpoint.ID,
 			ConnectionType: IPMI,
 			ConnectionHost: endpoint.RedfishEndpointFQDN,
 			ConnectionPort: sc.IPMI.Port,
 		}
-	
+
 	case sc.Telnet != nil && sc.Telnet.ServiceEnabled || sc.WebSocket != nil && sc.WebSocket.ServiceEnabled:
 		log.Printf("telnet and websocket not supported")
 	}
-
 
 	return nil
 }
@@ -214,14 +209,14 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 		switch strings.ToLower(ct) {
 		case SSH:
 			return &NodeConsoleInfo{
-				ID:       endpoint.ID,
+				ID:             endpoint.ID,
 				ConnectionType: SSH,
 				ConnectionHost: endpoint.RedfishEndpointFQDN,
 			}
 		case IPMI:
 			return &NodeConsoleInfo{
-				ID:       endpoint.ID,
-				ConnectionType: IPMI,	
+				ID:             endpoint.ID,
+				ConnectionType: IPMI,
 				ConnectionHost: endpoint.RedfishEndpointFQDN,
 			}
 		default:
@@ -232,10 +227,9 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 	return nil
 }
 
-
 // GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
 func currentNodesFromSMD(smdURL string) (nodes []NodeConsoleInfo, err error) {
-	
+
 	log.Printf("Starting to get current nodes on the system")
 
 	endpoints, err := getComponentEndpoints(smdURL)

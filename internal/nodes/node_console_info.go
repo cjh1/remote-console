@@ -8,24 +8,22 @@ package nodes
 import "fmt"
 
 const (
-	IPMI    = "ipmi"
-	SSH  = "ssh"
+	IPMI      = "ipmi"
+	SSH       = "ssh"
 	WebSocket = "websocket"
-	Telnet  = "telnet"
-	Oem   = "oem"
+	Telnet    = "telnet"
+	Oem       = "oem"
 )
-
 
 // NodeConsoleInfo holds all node level information needed to form a console connection
 // NOTE: this is the basic unit of information required for each node
 // Exported for use by console and creds packages
 
-
 type NodeConsoleInfo struct {
-	ID string `json:"id"` // node xname
+	ID             string `json:"id"`             // node xname
 	ConnectionType string `json:"connectionType"` // connection type
-	ConnectionHost string `json:"connectionHost"`// connection host
-	ConnectionPort int `json:"connectionPort"`   // connection port
+	ConnectionHost string `json:"connectionHost"` // connection host
+	ConnectionPort int    `json:"connectionPort"` // connection port
 }
 
 func (nc NodeConsoleInfo) String() string {

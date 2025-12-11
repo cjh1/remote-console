@@ -300,6 +300,36 @@ func loadRedfishEndpoints(ctx context.Context, network string, endpoints []redfi
 	return nil
 }
 
+func deleteRedfishEndpoint(ctx context.Context, network string, endpointID string) error {
+	cmd := fmt.Sprintf("apk add curl && curl -X DELETE http://smd:27779/hsm/v2/Inventory/RedfishEndpoints/%s", endpointID)
+
+	req := testcontainers.ContainerRequest{
+		Image:      "library/golang:1.24-alpine",
+		Networks:   []string{network},
+		Cmd:        []string{"sh", "-c", cmd},
+		WaitingFor: wait.ForExit().WithExitTimeout(30 * time.Second),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		return err
+	}
+
+	state, err := container.State(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get container state: %w", err)
+	}
+
+	if state.ExitCode != 0 {
+		return fmt.Errorf("failed to delete Redfish endpoint %s: exit code %d", endpointID, state.ExitCode)
+	}
+
+	return nil
+}
+
 // startSSHPasswordServer starts an SSH server with password authentication
 func startSSHPasswordServer(ctx context.Context, network string, alias string, username string, password string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
@@ -402,19 +432,21 @@ func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers
 			},
 		},
 		Env: map[string]string{
-			"RCS_SMD_URL":              "http://smd:27779",
-			"SMS_SERVER":               "http://smd:27779",
-			"CRAY_VAULT_AUTH_PATH":     "auth/token/create",
-			"CRAY_VAULT_ROLE_FILE":     "/app/configs/namespace",
-			"CRAY_VAULT_JWT_FILE":      "/app/configs/token",
-			"VAULT_ADDR":               "http://vault:8200",
-			"VAULT_TOKEN":              "hms",
-			"VAULT_BASE_PATH":          "hms-creds",
-			"VAULT_SKIP_VERIFY":        "true",
-			"VAULT_ENABLED":            "true",
-			"LOG_LEVEL":                "DEBUG",
-			"RCS_CONMAN_PID_FILE_PATH": "/app/remote-console.pid",
-			"RCS_CONMAN_LOGS_PATH":     "/tmp",
+			"RCS_SMD_URL":                "http://smd:27779",
+			"SMS_SERVER":                 "http://smd:27779",
+			"CRAY_VAULT_AUTH_PATH":       "auth/token/create",
+			"CRAY_VAULT_ROLE_FILE":       "/app/configs/namespace",
+			"CRAY_VAULT_JWT_FILE":        "/app/configs/token",
+			"VAULT_ADDR":                 "http://vault:8200",
+			"VAULT_TOKEN":                "hms",
+			"VAULT_BASE_PATH":            "hms-creds",
+			"VAULT_SKIP_VERIFY":          "true",
+			"VAULT_ENABLED":              "true",
+			"LOG_LEVEL":                  "DEBUG",
+			"RCS_NEW_NODE_LOOKUP":        "10",
+			"RCS_CREDS_MONITOR_INTERVAL": "10",
+			"RCS_CONMAN_PID_FILE_PATH":   "/app/remote-console.pid",
+			"RCS_CONMAN_LOGS_PATH":       "/tmp",
 		},
 		ExposedPorts: []string{"26776/tcp"},
 		WaitingFor: wait.ForHTTP("/remote-console/readiness").

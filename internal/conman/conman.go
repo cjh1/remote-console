@@ -112,7 +112,7 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 				nci.ID, nci.ConnectionHost, creds.Username, creds.Password)
 			consoles = append(consoles, output)
 
-		// SSH connection
+			// SSH connection
 		} else if nci.ConnectionType == nodes.SSH {
 			creds, ok := passwords[nci.ID]
 			if !ok {
@@ -131,7 +131,7 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 				log.Printf("console name=\"%s\" dev=\"%s/ssh-key-console %s %d %s %s\"\n",
 					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath)
 				output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-key-console %s %d %s %s\"\n",
-					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath) 
+					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath)
 				consoles = append(consoles, output)
 			}
 		}

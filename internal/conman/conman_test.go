@@ -52,20 +52,20 @@ func TestConfigureConman(t *testing.T) {
 
 	nodes := map[string]*nodes.NodeConsoleInfo{
 		"x0c0s1b0": &nodes.NodeConsoleInfo{
-			ID: "x0c0s1b0",
+			ID:             "x0c0s1b0",
 			ConnectionType: nodes.IPMI,
-			ConnectionHost:  "x0c0s1b0",
+			ConnectionHost: "x0c0s1b0",
 		},
 		"x0c0s2b0": &nodes.NodeConsoleInfo{
-			ID: "x0c0s2b0",
+			ID:             "x0c0s2b0",
 			ConnectionType: nodes.SSH,
-			ConnectionHost:  "x0c0s2b0",
+			ConnectionHost: "x0c0s2b0",
 			ConnectionPort: 2222,
 		},
 		"x0c0s3b0": &nodes.NodeConsoleInfo{
-			ID: "x0c0s3b0",
+			ID:             "x0c0s3b0",
 			ConnectionType: nodes.SSH,
-			ConnectionHost:  "x0c0s3b0",
+			ConnectionHost: "x0c0s3b0",
 		},
 	}
 

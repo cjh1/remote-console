@@ -25,7 +25,11 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
-const tailMessageTimeout = 2 * time.Minute
+const (
+	tailMessageTimeout = 2 * time.Minute
+	dynamicTestXname   = "x0c0s8b9"
+	defaultAuthConfig  = "ADMIN:ADMIN:Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
+)
 
 func uniqueMessage(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
@@ -34,10 +38,12 @@ func uniqueMessage(prefix string) string {
 // IntegrationTestSuite is the test suite for remote-console integration tests
 type IntegrationTestSuite struct {
 	suite.Suite
-	ctx        context.Context
-	apiURL     string
-	networks   []*testcontainers.DockerNetwork
-	containers map[string]testcontainers.Container
+	ctx            context.Context
+	apiURL         string
+	containers     map[string]testcontainers.Container
+	rcsNetwork     *testcontainers.DockerNetwork
+	rfNetwork      *testcontainers.DockerNetwork
+	consoleNetwork *testcontainers.DockerNetwork
 }
 
 // SetupSuite runs once before all tests in the suite
@@ -52,32 +58,32 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	// Create networks
 	rcsNet, err := network.New(s.ctx, network.WithCheckDuplicate())
 	require.NoError(s.T(), err)
-	s.networks = append(s.networks, rcsNet)
+	s.rcsNetwork = rcsNet
 
 	rcsRfNet, err := network.New(s.ctx, network.WithCheckDuplicate())
 	require.NoError(s.T(), err)
-	s.networks = append(s.networks, rcsRfNet)
+	s.rfNetwork = rcsRfNet
 
 	rcsConsoleNet, err := network.New(s.ctx, network.WithCheckDuplicate())
 	require.NoError(s.T(), err)
-	s.networks = append(s.networks, rcsConsoleNet)
+	s.consoleNetwork = rcsConsoleNet
 
 	// Start Vault
 	s.T().Log("Starting Vault...")
-	vaultContainer, err := startVault(s.ctx, rcsNet.Name, rcsConsoleNet.Name)
+	vaultContainer, err := startVault(s.ctx, s.rcsNetwork.Name, s.consoleNetwork.Name)
 	require.NoError(s.T(), err)
 	s.containers["vault"] = vaultContainer
 
 	// Enable KV store in Vault
 	s.T().Log("Enabling KV store in Vault...")
-	err = enableVaultKV(s.ctx, rcsNet.Name)
+	err = enableVaultKV(s.ctx, s.rcsNetwork.Name)
 	require.NoError(s.T(), err)
 
 	// Load SSH keys into Vault (if available)
 	s.T().Log("Loading SSH keys into Vault...")
 	sshKeyPath := getDefaultSSHKeyPath()
 	if _, err := os.Stat(sshKeyPath); err == nil {
-		err = loadSSHKeysIntoVault(s.ctx, rcsNet.Name, sshKeyPath)
+		err = loadSSHKeysIntoVault(s.ctx, s.rcsNetwork.Name, sshKeyPath)
 		require.NoError(s.T(), err)
 	} else {
 		s.T().Log("SSH key not found, skipping key loading")
@@ -85,33 +91,33 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	// Start Postgres
 	s.T().Log("Starting Postgres...")
-	postgresContainer, err := startPostgres(s.ctx, rcsNet.Name)
+	postgresContainer, err := startPostgres(s.ctx, s.rcsNetwork.Name)
 	require.NoError(s.T(), err)
 	s.containers["postgres"] = postgresContainer
 
 	// Initialize SMD database
 	s.T().Log("Initializing SMD database...")
-	err = initSMDDatabase(s.ctx, rcsNet.Name)
+	err = initSMDDatabase(s.ctx, s.rcsNetwork.Name)
 	require.NoError(s.T(), err)
 
 	// Start SMD
 	s.T().Log("Starting SMD...")
-	smdContainer, err := startSMD(s.ctx, rcsNet.Name, rcsRfNet.Name)
+	smdContainer, err := startSMD(s.ctx, s.rcsNetwork.Name, s.rfNetwork.Name)
 	require.NoError(s.T(), err)
 	s.containers["smd"] = smdContainer
 
 	// Start Redfish Emulators
 	s.T().Log("Starting Redfish emulators...")
-	authConfig := "ADMIN:ADMIN:Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
-	rfEmulator0, err := startRedfishEmulator(s.ctx, rcsRfNet.Name, "x0c0s0b0", "ssh", &authConfig)
+	authConfig := defaultAuthConfig
+	rfEmulator0, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s0b0", "ssh", &authConfig)
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s0b0"] = rfEmulator0
 
-	rfEmulator1, err := startRedfishEmulator(s.ctx, rcsRfNet.Name, "x0c0s1b0", "ssh", nil)
+	rfEmulator1, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s1b0", "ssh", nil)
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s1b0"] = rfEmulator1
 
-	rfEmulator2, err := startRedfishEmulator(s.ctx, rcsRfNet.Name, "x0c0s2b0", "ipmi", nil)
+	rfEmulator2, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s2b0", "ipmi", nil)
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s2b0"] = rfEmulator2
 
@@ -141,7 +147,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	// Start SSH password server
 	s.T().Log("Starting SSH password server...")
-	sshPasswordServer, err := startSSHPasswordServer(s.ctx, rcsConsoleNet.Name, "x0c0s0b0", "ADMIN", "ADMIN")
+	sshPasswordServer, err := startSSHPasswordServer(s.ctx, s.consoleNetwork.Name, "x0c0s0b0", "ADMIN", "ADMIN")
 	require.NoError(s.T(), err)
 	s.containers["ssh-password"] = sshPasswordServer
 
@@ -151,19 +157,19 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	if publicKey == "" {
 		s.T().Log("Warning: PUBLIC_KEY not set, SSH key server may not work properly")
 	}
-	sshKeyServer, err := startSSHKeyServer(s.ctx, rcsConsoleNet.Name, "x0c0s1b0", "n0", publicKey)
+	sshKeyServer, err := startSSHKeyServer(s.ctx, s.consoleNetwork.Name, "x0c0s1b0", "n0", publicKey)
 	require.NoError(s.T(), err)
 	s.containers["ssh-key"] = sshKeyServer
 
 	// Start IPMI server
 	s.T().Log("Starting IPMI server...")
-	ipmiServer, err := startIPMIServer(s.ctx, rcsConsoleNet.Name, "x0c0s2b0")
+	ipmiServer, err := startIPMIServer(s.ctx, s.consoleNetwork.Name, "x0c0s2b0")
 	require.NoError(s.T(), err)
 	s.containers["ipmi"] = ipmiServer
 
 	// Build and start remote-console
 	s.T().Log("Starting remote-console...")
-	remoteConsole, err := startRemoteConsole(s.ctx, rcsNet.Name, rcsConsoleNet.Name)
+	remoteConsole, err := startRemoteConsole(s.ctx, s.rcsNetwork.Name, s.consoleNetwork.Name)
 	require.NoError(s.T(), err)
 	s.containers["remote-console"] = remoteConsole
 
@@ -205,9 +211,12 @@ func (s *IntegrationTestSuite) TearDownSuite() {
 	}
 
 	// Clean up networks
-	for i := len(s.networks) - 1; i >= 0; i-- {
-		if err := s.networks[i].Remove(cleanupCtx); err != nil {
-			s.T().Logf("Warning: failed to remove network: %v", err)
+	for _, net := range []*testcontainers.DockerNetwork{s.consoleNetwork, s.rfNetwork, s.rcsNetwork} {
+		if net == nil {
+			continue
+		}
+		if err := net.Remove(cleanupCtx); err != nil {
+			s.T().Logf("Warning: failed to remove network %s: %v", net.Name, err)
 		}
 	}
 }
@@ -439,6 +448,56 @@ func (s *IntegrationTestSuite) waitForConsoles(expected int, timeout time.Durati
 	return fmt.Errorf("timed out waiting for %d consoles", expected)
 }
 
+func (s *IntegrationTestSuite) waitForConsoleID(nodeID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(s.apiURL + "/remote-console/consoles")
+		if err == nil {
+			var consolesResp console.ConsolesResponse
+			if decodeErr := json.NewDecoder(resp.Body).Decode(&consolesResp); decodeErr == nil {
+				for _, consoleInfo := range consolesResp.Consoles {
+					if consoleInfo.ID == nodeID {
+						resp.Body.Close()
+						return nil
+					}
+				}
+			}
+			resp.Body.Close()
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for console %s", nodeID)
+}
+
+func (s *IntegrationTestSuite) waitForConsoleRemoval(nodeID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(s.apiURL + "/remote-console/consoles")
+		if err == nil {
+			var consolesResp console.ConsolesResponse
+			if decodeErr := json.NewDecoder(resp.Body).Decode(&consolesResp); decodeErr == nil {
+				found := false
+
+				s.T().Logf("len: %d", len(consolesResp.Consoles))
+
+				for _, consoleInfo := range consolesResp.Consoles {
+					if consoleInfo.ID == nodeID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					resp.Body.Close()
+					return nil
+				}
+			}
+			resp.Body.Close()
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for console %s removal", nodeID)
+}
+
 // TestSSHPasswordConsoleConnection verifies SSH password-based console connection
 func (s *IntegrationTestSuite) TestSSHPasswordConsoleTail() {
 	path := "/remote-console/consoles/x0c0s0b0/tail"
@@ -498,6 +557,71 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailFollow() {
 	_, err = s.readWebSocketUntil(wsConn, testMsg, tailMessageTimeout)
 	s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", testMsg))
 	s.T().Log("Found test message in live stream!")
+}
+
+func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
+	newNodeID := dynamicTestXname
+
+	s.T().Logf("Starting dynamic Redfish emulator and SSH console for %s", newNodeID)
+	authConfig := defaultAuthConfig
+	rfContainer, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, newNodeID, "ssh", &authConfig)
+	s.Require().NoError(err)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := rfContainer.Terminate(ctx); err != nil {
+			s.T().Logf("Warning: failed to terminate dynamic Redfish emulator %s: %v", newNodeID, err)
+		}
+	}()
+
+	sshContainer, err := startSSHPasswordServer(s.ctx, s.consoleNetwork.Name, newNodeID, "ADMIN", "ADMIN")
+	s.Require().NoError(err)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := sshContainer.Terminate(ctx); err != nil {
+			s.T().Logf("Warning: failed to terminate dynamic SSH container %s: %v", newNodeID, err)
+		}
+	}()
+
+	err = loadRedfishEndpoints(s.ctx, s.rfNetwork.Name, []redfishEndpoint{{
+		Host:     newNodeID,
+		Username: "ADMIN",
+		Password: "ADMIN",
+	}})
+	s.Require().NoError(err, "failed to register dynamic Redfish endpoint")
+
+	s.Require().NoError(s.waitForConsoleID(newNodeID, 3*time.Minute), "remote-console did not detect new console")
+
+	wsConn, resp, err := s.connectInteractiveConsole(newNodeID, 90*time.Second)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	testMsg := "hostname\r"
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
+	s.Require().NoError(err, "Error sending test message to console")
+
+	expectedHostLine := newNodeID + "\r\n"
+	hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, 90*time.Second)
+	s.Require().NoError(err, "Expected hostname output from console")
+	s.Require().True(strings.Contains(hostnameOutput, expectedHostLine),
+		"Expected hostname command output in console output; got %q", hostnameOutput)
+
+	s.T().Log("Removing dynamic console registration")
+	err = deleteRedfishEndpoint(s.ctx, s.rfNetwork.Name, newNodeID)
+	s.Require().NoError(err, "failed to remove dynamic Redfish endpoint")
+	s.Require().NoError(s.waitForConsoleRemoval(newNodeID, 3*time.Minute), "remote-console did not drop dynamic console")
+
+	// Try to connect again, should fail
+	// TODO main this fail faster, we probably don't need to do the retries here
+	_, resp, err = s.connectInteractiveConsole(newNodeID, 30*time.Second)
+	s.Require().Error(err, "Expected error connecting to removed console")
+	if resp != nil {
+		s.T().Logf("Console removal connection response status: %d", resp.StatusCode)
+		defer resp.Body.Close()
+	}
+
 }
 
 // TestSSHPasswordConsoleTailLines verifies tail with lines=N for last N lines
