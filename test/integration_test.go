@@ -113,7 +113,9 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s0b0"] = rfEmulator0
 
-	rfEmulator1, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s1b0", "ssh", nil)
+
+	keyAuthConfig := "ADMIN::Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
+	rfEmulator1, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s1b0", "ssh", &keyAuthConfig)
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s1b0"] = rfEmulator1
 
@@ -130,8 +132,8 @@ func (s *IntegrationTestSuite) SetupSuite() {
 		},
 		{
 			Host:     "x0c0s1b0",
-			Username: "operator",
-			Password: "operator_password",
+			Username: "ADMIN",
+			Password: "",
 		},
 		{
 			Host:     "x0c0s2b0",
@@ -143,6 +145,13 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Log("Loading Redfish endpoints into SMD...")
 	time.Sleep(5 * time.Second) // Give RF emulators time to fully start
 	err = loadRedfishEndpoints(s.ctx, rcsRfNet.Name, redfishEndpoints)
+	require.NoError(s.T(), err)
+
+	s.T().Log("Overriding console credentials in Vault")
+	// This is needed to set the password to empty so the remote-console knows to use SSH key auth
+	// TODO SMD will not create the entry in Vault if the password is empty, so we have to set it here manually.
+	// We may need another approach later.
+	err = setConsoleCredentials(s.ctx, s.rcsNetwork.Name, "x0c0s1b0", "ADMIN", "")
 	require.NoError(s.T(), err)
 
 	// Start SSH password server
@@ -317,26 +326,17 @@ func (s *IntegrationTestSuite) TestConsoles() {
 
 }
 
-func (s *IntegrationTestSuite) websocketConnect(path string) (*websocket.Conn, *http.Response, error) {
-	// Parse the HTTP API URL to get host and port
+func (s *IntegrationTestSuite) tailWebSocketURL(nodeID string, rawQuery string) (url.URL, error) {
 	parsedURL, err := url.Parse(s.apiURL)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse API URL: %w", err)
+		return url.URL{}, fmt.Errorf("failed to parse API URL: %w", err)
 	}
-
-	wsURL := url.URL{
+	return url.URL{
 		Scheme:   "ws",
 		Host:     parsedURL.Host,
-		Path:     path,
-		RawQuery: "follow=true",
-	}
-
-	wsConn, resp, err := s.dialWebSocket(wsURL)
-	if err != nil {
-		return nil, resp, fmt.Errorf("WebSocket dial error: %v", err)
-	}
-
-	return wsConn, resp, nil
+		Path:     fmt.Sprintf("/remote-console/consoles/%s/tail", nodeID),
+		RawQuery: rawQuery,
+	}, nil
 }
 
 func (s *IntegrationTestSuite) readWebSocketMessages(wsConn *websocket.Conn, timeout time.Duration) string {
@@ -498,152 +498,146 @@ func (s *IntegrationTestSuite) waitForConsoleRemoval(nodeID string, timeout time
 	return fmt.Errorf("timed out waiting for console %s removal", nodeID)
 }
 
-// TestSSHPasswordConsoleConnection verifies SSH password-based console connection
-func (s *IntegrationTestSuite) TestSSHPasswordConsoleTail() {
-	path := "/remote-console/consoles/x0c0s0b0/tail"
-	wsConn, resp, err := s.websocketConnect(path)
-	s.Require().NoError(err)
-	defer resp.Body.Close()
-	defer wsConn.Close()
+func (s *IntegrationTestSuite) TestConsoleTail() {
+	for _, fixture := range consoleFixtures {
+		fixture := fixture
+		s.Run(fixture.Name, func() {
+			wsURL, err := s.tailWebSocketURL(fixture.NodeID, "")
+			s.Require().NoError(err)
 
-	tailOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
+			wsConn, resp, err := s.dialWebSocket(wsURL)
+			s.Require().NoError(err)
+			initialOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
+			if fixture.InitialLogMarker != "" {
+				s.Require().Contains(initialOutput, fixture.InitialLogMarker,
+					"Expected to find initial marker for %s", fixture.Name)
+			}
+			resp.Body.Close()
+			wsConn.Close()
 
-	s.Require().Contains(tailOutput, "Welcome to OpenSSH Server", "Expected to find 'Welcome to OpenSSH Server' in console output")
+			msg := uniqueMessage("tail-basic-" + fixture.Name)
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+			s.Require().NoError(err)
+			s.T().Logf("%s console echo to pts (exit code %d): %s", fixture.Name, exitCode, output)
 
-	msg := uniqueMessage("tail-basic")
-	sshPasswordContainer := s.containers["ssh-password"]
-	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
-	s.Require().NoError(err)
-	s.T().Logf("SSH Password container echo to pts (exit code %d): %s", exitCode, output)
+			wsConn, resp, err = s.dialWebSocket(wsURL)
+			s.Require().NoError(err)
+			defer resp.Body.Close()
+			defer wsConn.Close()
 
-	// Connect again to read the message
-	wsConn, resp, err = s.websocketConnect(path)
-	s.Require().NoError(err)
-	defer resp.Body.Close()
-	defer wsConn.Close()
-
-	tailOutput = s.readWebSocketMessages(wsConn, 30*time.Second)
-	s.Require().Contains(tailOutput, msg, fmt.Sprintf("Expected to find '%s' in console output", msg))
+			tailOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
+			s.Require().Contains(tailOutput, msg, fmt.Sprintf("Expected to find '%s' in console output", msg))
+		})
+	}
 }
 
-// TestSSHPasswordConsoleTailFollow verifies tail with follow=true for live updates
-func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailFollow() {
-	// Parse the HTTP API URL to get host and port
-	parsedURL, err := url.Parse(s.apiURL)
-	s.Require().NoError(err)
+func (s *IntegrationTestSuite) TestConsoleTailFollow() {
+	for _, fixture := range consoleFixtures {
+		fixture := fixture
+		s.Run(fixture.Name, func() {
+			wsURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
+			s.Require().NoError(err)
 
-	wsURL := url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "follow=true",
+			wsConn, resp, err := s.dialWebSocket(wsURL)
+			s.Require().NoError(err)
+			defer resp.Body.Close()
+			defer wsConn.Close()
+
+			if fixture.InitialLogMarker != "" {
+				_, err = s.readWebSocketUntil(wsConn, fixture.InitialLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "Expected to find initial marker for %s", fixture.Name)
+			}
+
+			testMsg := uniqueMessage("tail-follow-" + fixture.Name)
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, testMsg)
+			s.Require().NoError(err)
+			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+
+			_, err = s.readWebSocketUntil(wsConn, testMsg, tailMessageTimeout)
+			s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", testMsg))
+		})
 	}
-
-	wsConn, resp, err := s.dialWebSocket(wsURL)
-	s.Require().NoError(err)
-	defer resp.Body.Close()
-	defer wsConn.Close()
-
-	_, err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", tailMessageTimeout)
-	s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
-	s.T().Log("Found welcome message")
-
-	testMsg := uniqueMessage("tail-follow")
-	sshPasswordContainer := s.containers["ssh-password"]
-	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", testMsg})
-	s.Require().NoError(err)
-	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
-
-	_, err = s.readWebSocketUntil(wsConn, testMsg, tailMessageTimeout)
-	s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", testMsg))
-	s.T().Log("Found test message in live stream!")
 }
 
 func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
-	parsedURL, err := url.Parse(s.apiURL)
-	s.Require().NoError(err)
+	for _, fixture := range consoleFixtures {
+		fixture := fixture
+		s.Run(fixture.Name, func() {
+			wsURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
+			s.Require().NoError(err)
 
-	followURL := url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "follow=true",
+			firstConn, firstResp, err := s.dialWebSocket(wsURL)
+			s.Require().NoError(err)
+			defer firstResp.Body.Close()
+			defer firstConn.Close()
+
+			secondConn, secondResp, err := s.dialWebSocket(wsURL)
+			s.Require().NoError(err)
+			defer secondResp.Body.Close()
+			defer secondConn.Close()
+
+			if fixture.InitialLogMarker != "" {
+				_, err = s.readWebSocketUntil(firstConn, fixture.InitialLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "first follow connection did not see initial marker")
+
+				_, err = s.readWebSocketUntil(secondConn, fixture.InitialLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "second follow connection did not see initial marker")
+			}
+
+			msg := uniqueMessage("tail-concurrent-" + fixture.Name)
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+			s.Require().NoError(err)
+			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+
+			_, err = s.readWebSocketUntil(firstConn, msg, 30*time.Second)
+			s.Require().NoError(err, "first follow connection did not see broadcast message")
+
+			_, err = s.readWebSocketUntil(secondConn, msg, 30*time.Second)
+			s.Require().NoError(err, "second follow connection did not see broadcast message")
+		})
 	}
-
-	firstConn, firstResp, err := s.dialWebSocket(followURL)
-	s.Require().NoError(err)
-	defer firstResp.Body.Close()
-	defer firstConn.Close()
-
-	secondConn, secondResp, err := s.dialWebSocket(followURL)
-	s.Require().NoError(err)
-	defer secondResp.Body.Close()
-	defer secondConn.Close()
-
-	_, err = s.readWebSocketUntil(firstConn, "Welcome to OpenSSH Server", tailMessageTimeout)
-	s.Require().NoError(err, "first follow connection did not see welcome message")
-
-	_, err = s.readWebSocketUntil(secondConn, "Welcome to OpenSSH Server", tailMessageTimeout)
-	s.Require().NoError(err, "second follow connection did not see welcome message")
-
-	msg := uniqueMessage("tail-concurrent")
-	sshPasswordContainer := s.containers["ssh-password"]
-	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
-	s.Require().NoError(err)
-	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
-
-	_, err = s.readWebSocketUntil(firstConn, msg, 30*time.Second)
-	s.Require().NoError(err, "first follow connection did not see broadcast message")
-
-	_, err = s.readWebSocketUntil(secondConn, msg, 30*time.Second)
-	s.Require().NoError(err, "second follow connection did not see broadcast message")
 }
 
 func (s *IntegrationTestSuite) TestConsoleTailHistoryFollowConcurrent() {
-	parsedURL, err := url.Parse(s.apiURL)
-	s.Require().NoError(err)
+	for _, fixture := range consoleFixtures {
+		fixture := fixture
 
-	historyFollowURL := url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "lines=50&follow=true",
+		s.Run(fixture.Name, func() {
+			historyURL, err := s.tailWebSocketURL(fixture.NodeID, "lines=50&follow=true")
+			s.Require().NoError(err)
+			followURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
+			s.Require().NoError(err)
+
+			historyConn, historyResp, err := s.dialWebSocket(historyURL)
+			s.Require().NoError(err)
+			defer historyResp.Body.Close()
+			defer historyConn.Close()
+
+			followConn, followResp, err := s.dialWebSocket(followURL)
+			s.Require().NoError(err)
+			defer followResp.Body.Close()
+			defer followConn.Close()
+
+			if fixture.InitialLogMarker != "" {
+				_, err = s.readWebSocketUntil(historyConn, fixture.InitialLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "history+follow connection did not see initial marker")
+
+				_, err = s.readWebSocketUntil(followConn, fixture.InitialLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "follow-only connection did not see initial marker")
+			}
+
+			msg := uniqueMessage("tail-history-follow-" + fixture.Name)
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+			s.Require().NoError(err)
+			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+
+			_, err = s.readWebSocketUntil(historyConn, msg, 30*time.Second)
+			s.Require().NoError(err, "history+follow connection did not see broadcast message")
+
+			_, err = s.readWebSocketUntil(followConn, msg, 30*time.Second)
+			s.Require().NoError(err, "follow-only connection did not see broadcast message while history+follow connection was active")
+		})
 	}
-
-	followURL := url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "follow=true",
-	}
-
-	historyConn, historyResp, err := s.dialWebSocket(historyFollowURL)
-	s.Require().NoError(err)
-	defer historyResp.Body.Close()
-	defer historyConn.Close()
-
-	followConn, followResp, err := s.dialWebSocket(followURL)
-	s.Require().NoError(err)
-	defer followResp.Body.Close()
-	defer followConn.Close()
-
-	_, err = s.readWebSocketUntil(historyConn, "Welcome to OpenSSH Server", tailMessageTimeout)
-	s.Require().NoError(err, "history+follow connection did not see welcome message")
-
-	_, err = s.readWebSocketUntil(followConn, "Welcome to OpenSSH Server", tailMessageTimeout)
-	s.Require().NoError(err, "follow-only connection did not see welcome message")
-
-	msg := uniqueMessage("tail-history-follow")
-	sshPasswordContainer := s.containers["ssh-password"]
-	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
-	s.Require().NoError(err)
-	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
-
-	_, err = s.readWebSocketUntil(historyConn, msg, 30*time.Second)
-	s.Require().NoError(err, "history+follow connection did not see broadcast message")
-
-	_, err = s.readWebSocketUntil(followConn, msg, 30*time.Second)
-	s.Require().NoError(err, "follow-only connection did not see broadcast message while history+follow connection was active")
 }
 
 func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
@@ -680,7 +674,7 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 
 	s.Require().NoError(s.waitForConsoleID(newNodeID, 3*time.Minute), "remote-console did not detect new console")
 
-	wsConn, resp, err := s.connectInteractiveConsole(newNodeID, 90*time.Second)
+	wsConn, resp, err := s.connectInteractiveConsole(newNodeID, ":~$ ", 90*time.Second)
 	s.Require().NoError(err)
 	defer resp.Body.Close()
 	defer wsConn.Close()
@@ -702,7 +696,7 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 
 	// Try to connect again, should fail
 	// TODO main this fail faster, we probably don't need to do the retries here
-	_, resp, err = s.connectInteractiveConsole(newNodeID, 30*time.Second)
+	_, resp, err = s.connectInteractiveConsole(newNodeID, ":~$ ", 30*time.Second)
 	s.Require().Error(err, "Expected error connecting to removed console")
 	if resp != nil {
 		s.T().Logf("Console removal connection response status: %d", resp.StatusCode)
@@ -721,7 +715,7 @@ func (s *IntegrationTestSuite) TestConsoleRemoval() {
 	s.Require().NoError(s.waitForConsoleRemoval(targetNode, 3*time.Minute), "remote-console did not remove console %s", targetNode)
 
 	s.T().Log("Verifying console is no longer reachable")
-	conn, resp, err := s.connectInteractiveConsole(targetNode, 30*time.Second)
+	conn, resp, err := s.connectInteractiveConsole(targetNode, ":~$ ", 30*time.Second)
 	if conn != nil {
 		conn.Close()
 	}
@@ -740,138 +734,97 @@ func (s *IntegrationTestSuite) TestConsoleRemoval() {
 	s.Require().NoError(s.waitForConsoleID(targetNode, 3*time.Minute), "remote-console did not rediscover console %s", targetNode)
 }
 
-// TestSSHPasswordConsoleTailLines verifies tail with lines=N for last N lines
-func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLines() {
-	// Parse the HTTP API URL to get host and port
-	parsedURL, err := url.Parse(s.apiURL)
-	s.Require().NoError(err)
+func (s *IntegrationTestSuite) TestConsoleTailLines() {
+	for _, fixture := range consoleFixtures {
+		fixture := fixture
+		s.Run(fixture.Name, func() {
+			followURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
+			s.Require().NoError(err)
 
-	// Connect and follow until see see that conman is connected to
-	// the console
-	wsURL := url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "follow=true",
+			msg := uniqueMessage("tail-lines-" + fixture.Name)
+
+			func() {
+				wsConn, resp, err := s.dialWebSocket(followURL)
+				s.Require().NoError(err)
+				defer resp.Body.Close()
+				defer wsConn.Close()
+
+				if fixture.InitialLogMarker != "" {
+					_, err = s.readWebSocketUntil(wsConn, fixture.InitialLogMarker, tailMessageTimeout)
+					s.Require().NoError(err, "Expected to find initial output for %s", fixture.Name)
+				}
+
+				exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+				s.Require().NoError(err)
+				s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+			}()
+
+			linesURL, err := s.tailWebSocketURL(fixture.NodeID, "lines=1")
+			s.Require().NoError(err)
+
+			wsConn, resp, err := s.dialWebSocket(linesURL)
+			s.Require().NoError(err)
+			defer resp.Body.Close()
+			defer wsConn.Close()
+
+			tailOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
+			lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
+			s.Require().Len(lines, 1, "Expected exactly one line from tail with lines=1")
+			s.Require().Contains(lines[0], msg, "Test message not found in console output")
+		})
 	}
-
-	msg := uniqueMessage("tail-lines")
-	sshPasswordContainer := s.containers["ssh-password"]
-
-	// Use an anonymous function to scope the first connection
-	// so we can close it before reconnecting
-	func() {
-		wsConn, resp, err := s.dialWebSocket(wsURL)
-		s.Require().NoError(err)
-		defer resp.Body.Close()
-		defer wsConn.Close()
-
-		_, err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", tailMessageTimeout)
-		s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
-
-		exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
-		s.Require().NoError(err)
-		s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
-	}()
-
-	// Now connect again to read last line
-	wsURL = url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "lines=1",
-	}
-
-	wsConn, resp, err := s.dialWebSocket(wsURL)
-	s.Require().NoError(err)
-	defer resp.Body.Close()
-	defer wsConn.Close()
-
-	tailOutput := s.readWebSocketMessages(wsConn, 30*time.Minute)
-
-	// We expect to see one line, split on newlines
-	lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
-
-	fmt.Println("Tail output lines:")
-	for _, line := range lines {
-		fmt.Printf(">> %s\n", line)
-	}
-
-	s.Require().Len(lines, 1, "Expected exactly one line from tail with lines=1")
-
-	s.Require().Contains(lines[0], msg, "Test message not found in console output")
 }
 
-// TestSSHPasswordConsoleTailLines verifies tail with lines=N for last N lines and then follow
-func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailLinesFollow() {
-	// Parse the HTTP API URL to get host and port
-	parsedURL, err := url.Parse(s.apiURL)
-	s.Require().NoError(err)
+func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
+	for _, fixture := range consoleFixtures {
+		fixture := fixture
+		s.Run(fixture.Name, func() {
+			followURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
+			s.Require().NoError(err)
 
-	// Connect and follow until see see that conman is connected to
-	// the console
-	wsURL := url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "follow=true",
+			msg := uniqueMessage("tail-lines-initial-" + fixture.Name)
+
+			func() {
+				wsConn, resp, err := s.dialWebSocket(followURL)
+				s.Require().NoError(err)
+				defer resp.Body.Close()
+				defer wsConn.Close()
+
+				if fixture.InitialLogMarker != "" {
+					_, err = s.readWebSocketUntil(wsConn, fixture.InitialLogMarker, tailMessageTimeout)
+					s.Require().NoError(err, "Expected to find initial output for %s", fixture.Name)
+				}
+
+				exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+				s.Require().NoError(err)
+				s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+			}()
+
+			linesFollowURL, err := s.tailWebSocketURL(fixture.NodeID, "lines=1&follow=true")
+			s.Require().NoError(err)
+
+			followConn, followResp, err := s.dialWebSocket(linesFollowURL)
+			s.Require().NoError(err)
+			defer followResp.Body.Close()
+			defer followConn.Close()
+
+			tailOutput, err := s.readWebSocketUntil(followConn, msg, 30*time.Second)
+			s.Require().NoError(err, "Expected to find initial test message in tail output")
+			lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
+			s.Require().Len(lines, 1, "Expected exactly one line from tail with lines=1")
+			s.Require().Contains(lines[0], msg, "Test message not found in console output")
+
+			followMsg := uniqueMessage("tail-lines-follow-" + fixture.Name)
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, followMsg)
+			s.Require().NoError(err)
+			s.T().Logf("Sent follow-up message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+
+			tailOutput, err = s.readWebSocketUntil(followConn, followMsg, 200*time.Second)
+			s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", followMsg))
+			lines = strings.Split(strings.TrimSpace(tailOutput), "\n")
+			s.Require().Len(lines, 1, "Expected exactly one line from tail with follow after sending follow-up message")
+		})
 	}
-
-	fmt.Println("Connecting to WebSocket for tail with follow=true")
-
-	msg := uniqueMessage("tail-lines-initial")
-	sshPasswordContainer := s.containers["ssh-password"]
-
-	func() {
-		wsConn, resp, err := s.dialWebSocket(wsURL)
-		s.Require().NoError(err)
-		defer resp.Body.Close()
-		defer wsConn.Close()
-
-		_, err = s.readWebSocketUntil(wsConn, "Welcome to OpenSSH Server", tailMessageTimeout)
-		s.Require().NoError(err, "Expected to find 'Welcome to OpenSSH Server' in initial output")
-
-		exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
-		s.Require().NoError(err)
-		s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
-	}()
-
-	// Now connect again to read last line and stay in follow mode
-	linesFollowURL := url.URL{
-		Scheme:   "ws",
-		Host:     parsedURL.Host,
-		Path:     "/remote-console/consoles/x0c0s0b0/tail",
-		RawQuery: "lines=1&follow=true",
-	}
-
-	fmt.Println("Connecting to WebSocket for tail with lines=1&follow=true")
-
-	followConn, followResp, err := s.dialWebSocket(linesFollowURL)
-	s.Require().NoError(err)
-	defer followResp.Body.Close()
-	defer followConn.Close()
-
-	tailOutput, err := s.readWebSocketUntil(followConn, msg, 30*time.Minute)
-	s.Require().NoError(err, "Expected to find initial test message in tail output")
-
-	lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
-	s.Require().Len(lines, 1, "Expected exactly one line from tail with lines=1")
-	s.Require().Contains(lines[0], msg, "Test message not found in console output")
-
-	// Now send another message and verify we get it
-	followMsg := uniqueMessage("tail-lines-follow")
-	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", followMsg})
-	s.Require().NoError(err)
-	s.T().Logf("Sent follow-up message to console (exit code %d): %s", exitCode, output)
-
-	fmt.Printf("Starting read until")
-
-	// Continue reading from the same connection to get the new message
-	tailOutput, err = s.readWebSocketUntil(followConn, followMsg, 200*time.Second)
-	s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", followMsg))
-	lines = strings.Split(strings.TrimSpace(tailOutput), "\n")
-	s.Require().Len(lines, 1, "Expected exactly one line from tail with follow after sending follow-up message")
-	s.T().Log("Found follow-up message in live stream!")
 }
 
 // // TestSSHKeyConsoleConnection verifies SSH key-based console connection

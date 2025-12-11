@@ -15,59 +15,70 @@ const (
 	consoleRetryDelay      = 8 * time.Second
 )
 
-func (s *IntegrationTestSuite) TestSSHPasswordConsoleInteractive() {
+func (s *IntegrationTestSuite) TestConsoleInteractive() {
 	promptTimeout := 90 * time.Second
 
-	nodeID := "x0c0s0b0"
-	wsConn, resp, err := s.connectInteractiveConsole(nodeID, promptTimeout)
-	s.Require().NoError(err)
-	defer resp.Body.Close()
-	defer wsConn.Close()
+	for _, fixture := range consoleFixtures {
+		if !fixture.SupportsInteractive {
+			continue
+		}
+		fixture := fixture
 
-	// Execute hostname over websocket (carriage return to mimic Enter)
-	testMsg := "hostname\r"
-	err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
-	s.Require().NoError(err, "Error sending test message to console")
+		s.Run(fixture.Name, func() {
+			wsConn, resp, err := s.connectInteractiveConsole(fixture.NodeID, fixture.PromptSubstring, promptTimeout)
+			s.Require().NoError(err)
+			defer resp.Body.Close()
+			defer wsConn.Close()
 
-	expectedHostLine := nodeID + "\r\n"
-	hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
-	s.Require().NoError(err, "Expected hostname output from console")
-	s.Require().True(strings.Contains(hostnameOutput, expectedHostLine),
-		"Expected hostname command output in console output; got %q", hostnameOutput)
-	s.T().Logf("Received hostname from console: %s", hostnameOutput)
+			testMsg := "hostname\r"
+			err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
+			s.Require().NoError(err, "Error sending test message to console")
+
+			expectedHostLine := fixture.ExpectedHostname + "\r\n"
+			hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+			s.Require().NoError(err, "Expected hostname output from console")
+			s.Require().True(strings.Contains(hostnameOutput, expectedHostLine),
+				"Expected hostname command output in console output; got %q", hostnameOutput)
+			s.T().Logf("Received hostname from console %s: %s", fixture.Name, hostnameOutput)
+		})
+	}
 }
 
-func (s *IntegrationTestSuite) TestSSHPasswordConsoleInteractiveTail() {
+func (s *IntegrationTestSuite) TestConsoleInteractiveTail() {
 	promptTimeout := 90 * time.Second
 
-	nodeID := "x0c0s0b0"
-	wsConn, resp, err := s.connectInteractiveConsole(nodeID, promptTimeout)
-	s.Require().NoError(err)
-	defer resp.Body.Close()
-	defer wsConn.Close()
+	for _, fixture := range consoleFixtures {
+		if !fixture.SupportsInteractive {
+			continue
+		}
+		fixture := fixture
 
-	// Execute hostname over websocket
-	testMsg := "hostname\r"
-	err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
-	s.Require().NoError(err, "Error sending test message to console")
+		s.Run(fixture.Name, func() {
+			wsConn, resp, err := s.connectInteractiveConsole(fixture.NodeID, fixture.PromptSubstring, promptTimeout)
+			s.Require().NoError(err)
+			defer resp.Body.Close()
+			defer wsConn.Close()
 
-	// Read response until the hostname appears, ensuring the command executed
-	expectedHostLine := nodeID + "\r\n"
-	hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
-	s.Require().NoError(err, "Expected hostname output from console")
-	s.Require().True(strings.Contains(hostnameOutput, expectedHostLine),
-		"Expected hostname command output in console output; got %q", hostnameOutput)
-	s.T().Logf("Received hostname from console: %s", hostnameOutput)
+			testMsg := "hostname\r"
+			err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
+			s.Require().NoError(err, "Error sending test message to console")
 
-	// Broadcast a message to the console log and ensure we see it in the tail output
-	msg := "only me"
-	sshPasswordContainer := s.containers["ssh-password"]
-	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
-	s.Require().NoError(err)
-	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
+			expectedHostLine := fixture.ExpectedHostname + "\r\n"
+			hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+			s.Require().NoError(err, "Expected hostname output from console")
+			s.Require().True(strings.Contains(hostnameOutput, expectedHostLine),
+				"Expected hostname command output in console output; got %q", hostnameOutput)
+			s.T().Logf("Received hostname from console %s: %s", fixture.Name, hostnameOutput)
 
-	_, err = s.readWebSocketUntil(wsConn, msg, 30*time.Second)
-	s.Require().NoError(err, "Expected to find broadcast message in console output")
+			msg := uniqueMessage("interactive-tail-" + fixture.Name)
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+			s.Require().NoError(err)
+			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+
+			_, err = s.readWebSocketUntil(wsConn, msg, 30*time.Second)
+			s.Require().NoError(err, "Expected to find broadcast message in console output")
+		})
+	}
 }
 
 func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, searchString string, totalTimeout time.Duration) (string, error) {
@@ -99,7 +110,7 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 	}
 }
 
-func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptTimeout time.Duration) (*websocket.Conn, *http.Response, error) {
+func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptSubstring string, promptTimeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	parsedURL, err := url.Parse(s.apiURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse API URL: %w", err)
@@ -126,29 +137,33 @@ func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptTi
 			continue
 		}
 
-		initialOutput, err := s.waitForConsolePrompt(wsConn, ":~$ ", promptTimeout)
-		if err != nil {
-			resp.Body.Close()
-			wsConn.Close()
-			lastErr = err
-			s.T().Logf("Console prompt attempt %d/%d failed: %v", attempt, consoleConnectAttempts, err)
-			if initialOutput != "" {
-				s.T().Logf("Console output before failure (attempt %d): %q", attempt, initialOutput)
+		if promptSubstring != "" {
+			initialOutput, err := s.waitForConsolePrompt(wsConn, promptSubstring, promptTimeout)
+			if err != nil {
+				resp.Body.Close()
+				wsConn.Close()
+				lastErr = err
+				s.T().Logf("Console prompt attempt %d/%d failed: %v", attempt, consoleConnectAttempts, err)
+				if initialOutput != "" {
+					s.T().Logf("Console output before failure (attempt %d): %q", attempt, initialOutput)
+				}
+				time.Sleep(consoleRetryDelay)
+				continue
 			}
-			time.Sleep(consoleRetryDelay)
-			continue
-		}
 
-		if !strings.Contains(initialOutput, fmt.Sprintf("%s:~$", nodeID)) {
-			resp.Body.Close()
-			wsConn.Close()
-			lastErr = fmt.Errorf("prompt host mismatch, expected %s:~$ in console output: %q", nodeID, initialOutput)
-			s.T().Logf("Prompt host mismatch on attempt %d; output: %q", attempt, initialOutput)
-			time.Sleep(consoleRetryDelay)
-			continue
-		}
+			if !strings.Contains(initialOutput, fmt.Sprintf("%s:~$", nodeID)) {
+				resp.Body.Close()
+				wsConn.Close()
+				lastErr = fmt.Errorf("prompt host mismatch, expected %s:~$ in console output: %q", nodeID, initialOutput)
+				s.T().Logf("Prompt host mismatch on attempt %d; output: %q", attempt, initialOutput)
+				time.Sleep(consoleRetryDelay)
+				continue
+			}
 
-		s.T().Logf("Console %s ready: %s", nodeID, initialOutput)
+			s.T().Logf("Console %s ready: %s", nodeID, initialOutput)
+		} else {
+			s.T().Logf("Skipping prompt wait for console %s", nodeID)
+		}
 		return wsConn, resp, nil
 	}
 

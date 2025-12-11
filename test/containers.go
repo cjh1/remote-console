@@ -104,6 +104,41 @@ func loadSSHKeysIntoVault(ctx context.Context, network string, sshKeyPath string
 	return err
 }
 
+func setConsoleCredentials(ctx context.Context, network, xname, username, password string) error {
+	cmd := fmt.Sprintf("vault kv put hms-creds/%s Username=%s Password='%s' Xname=%s",
+		xname, username, password, xname)
+
+	req := testcontainers.ContainerRequest{
+		Image:    "docker.io/library/vault:1.5.5",
+		Networks: []string{network},
+		Env: map[string]string{
+			"VAULT_ADDR":  "http://vault:8200",
+			"VAULT_TOKEN": "hms",
+		},
+		Cmd:        []string{"sh", "-c", cmd},
+		WaitingFor: wait.ForExit().WithExitTimeout(30 * time.Second),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		return err
+	}
+
+	state, err := container.State(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get container state: %w", err)
+	}
+
+	if state.ExitCode != 0 {
+		return fmt.Errorf("failed to store credentials for %s: exit code %d", xname, state.ExitCode)
+	}
+
+	return nil
+}
+
 // startPostgres starts a PostgreSQL container
 func startPostgres(ctx context.Context, network string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
@@ -381,6 +416,13 @@ func startSSHKeyServer(ctx context.Context, network string, alias string, userna
 		},
 		ExposedPorts: []string{"2222/tcp"},
 		WaitingFor:   wait.ForLog("done.").WithStartupTimeout(60 * time.Second),
+		Files: []testcontainers.ContainerFile{
+			{
+				HostFilePath:      "broadcast.sh",
+				ContainerFilePath: "/usr/local/bin/broadcast.sh",
+				FileMode:          0755,
+			},
+		},
 	}
 
 	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
