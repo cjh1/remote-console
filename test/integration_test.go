@@ -559,6 +559,46 @@ func (s *IntegrationTestSuite) TestSSHPasswordConsoleTailFollow() {
 	s.T().Log("Found test message in live stream!")
 }
 
+func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err)
+
+	followURL := url.URL{
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
+		Path:     "/remote-console/consoles/x0c0s0b0/tail",
+		RawQuery: "follow=true",
+	}
+
+	firstConn, firstResp, err := s.dialWebSocket(followURL)
+	s.Require().NoError(err)
+	defer firstResp.Body.Close()
+	defer firstConn.Close()
+
+	secondConn, secondResp, err := s.dialWebSocket(followURL)
+	s.Require().NoError(err)
+	defer secondResp.Body.Close()
+	defer secondConn.Close()
+
+	_, err = s.readWebSocketUntil(firstConn, "Welcome to OpenSSH Server", tailMessageTimeout)
+	s.Require().NoError(err, "first follow connection did not see welcome message")
+
+	_, err = s.readWebSocketUntil(secondConn, "Welcome to OpenSSH Server", tailMessageTimeout)
+	s.Require().NoError(err, "second follow connection did not see welcome message")
+
+	msg := uniqueMessage("tail-concurrent")
+	sshPasswordContainer := s.containers["ssh-password"]
+	exitCode, output, err := sshPasswordContainer.Exec(s.ctx, []string{"broadcast.sh", msg})
+	s.Require().NoError(err)
+	s.T().Logf("Sent test message to console (exit code %d): %s", exitCode, output)
+
+	_, err = s.readWebSocketUntil(firstConn, msg, 30*time.Second)
+	s.Require().NoError(err, "first follow connection did not see broadcast message")
+
+	_, err = s.readWebSocketUntil(secondConn, msg, 30*time.Second)
+	s.Require().NoError(err, "second follow connection did not see broadcast message")
+}
+
 func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 	newNodeID := dynamicTestXname
 
