@@ -113,7 +113,6 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s0b0"] = rfEmulator0
 
-
 	keyAuthConfig := "ADMIN::Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
 	rfEmulator1, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s1b0", "ssh", &keyAuthConfig)
 	require.NoError(s.T(), err)

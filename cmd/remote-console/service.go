@@ -185,6 +185,10 @@ func runService(config remoteConsoleConfig) error {
 
 	logsService := logs.NewLogsService(config.Log)
 
+	if _, err = credsService.EnsureConsoleKeysPresent(); err != nil {
+		log.Printf("Error ensuring console SSH keys present: %v", err)
+	}
+
 	// Start log rotation with callback to signal conman
 	go logRotate(config, conmanService, logsService)
 
