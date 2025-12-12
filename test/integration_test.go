@@ -166,7 +166,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	if publicKey == "" {
 		s.T().Log("Warning: PUBLIC_KEY not set, SSH key server may not work properly")
 	}
-	sshKeyServer, err := startSSHKeyServer(s.ctx, s.consoleNetwork.Name, "x0c0s1b0", "n0", publicKey)
+	sshKeyServer, err := startSSHKeyServer(s.ctx, s.consoleNetwork.Name, "x0c0s1b0", "ADMIN", publicKey)
 	require.NoError(s.T(), err)
 	s.containers["ssh-key"] = sshKeyServer
 
