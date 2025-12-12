@@ -118,7 +118,8 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s1b0"] = rfEmulator1
 
-	rfEmulator2, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s2b0", "ipmi", nil)
+	keyAuthConfig = "root:root_password:Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
+	rfEmulator2, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, "x0c0s2b0", "ipmi", &keyAuthConfig)
 	require.NoError(s.T(), err)
 	s.containers["rf-x0c0s2b0"] = rfEmulator2
 
@@ -136,8 +137,8 @@ func (s *IntegrationTestSuite) SetupSuite() {
 		},
 		{
 			Host:     "x0c0s2b0",
-			Username: "guest",
-			Password: "guest_password",
+			Username: "root",
+			Password: "root_password",
 		},
 	}
 
@@ -197,7 +198,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	s.T().Logf("Remote console API available at: %s", s.apiURL)
 	s.T().Log("Waiting for remote-console to discover consoles...")
-	s.Require().NoError(s.waitForConsoles(6, 5*time.Minute), "remote-console did not discover expected consoles")
+	s.Require().NoError(s.waitForConsoles(5, 5*time.Minute), "remote-console did not discover expected consoles")
 }
 
 // TearDownSuite runs once after all tests in the suite
@@ -306,12 +307,6 @@ func (s *IntegrationTestSuite) TestConsoles() {
 		},
 		{
 			ID:             "x0c0s2b0",
-			ConnectionType: "ipmi",
-			ConnectionHost: "x0c0s2b0",
-			ConnectionPort: 0,
-		},
-		{
-			ID:             "x0c0s2b0n0",
 			ConnectionType: "ipmi",
 			ConnectionHost: "x0c0s2b0",
 			ConnectionPort: 0,
