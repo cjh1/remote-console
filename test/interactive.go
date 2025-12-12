@@ -19,13 +19,10 @@ func (s *IntegrationTestSuite) TestConsoleInteractive() {
 	promptTimeout := 90 * time.Second
 
 	for _, fixture := range consoleFixtures {
-		if !fixture.SupportsInteractive {
-			continue
-		}
 		fixture := fixture
 
-		s.Run(fixture.Name, func() {
-			wsConn, resp, err := s.connectInteractiveConsole(fixture.NodeID, fixture.PromptSubstring, promptTimeout)
+		s.Run(fixture.name, func() {
+			wsConn, resp, err := s.connectInteractiveConsole(fixture.nodeID, fixture.prompt, promptTimeout)
 			s.Require().NoError(err)
 			defer resp.Body.Close()
 			defer wsConn.Close()
@@ -34,12 +31,12 @@ func (s *IntegrationTestSuite) TestConsoleInteractive() {
 			err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
 			s.Require().NoError(err, "Error sending test message to console")
 
-			expectedHostLine := fixture.ExpectedHostname + "\r\n"
+			expectedHostLine := fixture.nodeID + "\r\n"
 			hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
 			s.Require().NoError(err, "Expected hostname output from console")
 			s.Require().True(strings.Contains(hostnameOutput, expectedHostLine),
 				"Expected hostname command output in console output; got %q", hostnameOutput)
-			s.T().Logf("Received hostname from console %s: %s", fixture.Name, hostnameOutput)
+			s.T().Logf("Received hostname from console %s: %s", fixture.name, hostnameOutput)
 		})
 	}
 }
@@ -48,13 +45,10 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveTail() {
 	promptTimeout := 90 * time.Second
 
 	for _, fixture := range consoleFixtures {
-		if !fixture.SupportsInteractive {
-			continue
-		}
 		fixture := fixture
 
-		s.Run(fixture.Name, func() {
-			wsConn, resp, err := s.connectInteractiveConsole(fixture.NodeID, fixture.PromptSubstring, promptTimeout)
+		s.Run(fixture.name, func() {
+			wsConn, resp, err := s.connectInteractiveConsole(fixture.nodeID, fixture.prompt, promptTimeout)
 			s.Require().NoError(err)
 			defer resp.Body.Close()
 			defer wsConn.Close()
@@ -63,17 +57,17 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveTail() {
 			err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
 			s.Require().NoError(err, "Error sending test message to console")
 
-			expectedHostLine := fixture.ExpectedHostname + "\r\n"
+			expectedHostLine := fixture.nodeID + "\r\n"
 			hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
 			s.Require().NoError(err, "Expected hostname output from console")
 			s.Require().True(strings.Contains(hostnameOutput, expectedHostLine),
 				"Expected hostname command output in console output; got %q", hostnameOutput)
-			s.T().Logf("Received hostname from console %s: %s", fixture.Name, hostnameOutput)
+			s.T().Logf("Received hostname from console %s: %s", fixture.name, hostnameOutput)
 
-			msg := uniqueMessage("interactive-tail-" + fixture.Name)
+			msg := uniqueMessage("interactive-tail-" + fixture.name)
 			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
 			s.Require().NoError(err)
-			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
+			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.name, exitCode, output)
 
 			_, err = s.readWebSocketUntil(wsConn, msg, 30*time.Second)
 			s.Require().NoError(err, "Expected to find broadcast message in console output")
@@ -110,7 +104,7 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 	}
 }
 
-func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptSubstring string, promptTimeout time.Duration) (*websocket.Conn, *http.Response, error) {
+func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, prompt string, promptTimeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	parsedURL, err := url.Parse(s.apiURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse API URL: %w", err)
@@ -137,8 +131,8 @@ func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, promptSu
 			continue
 		}
 
-		if promptSubstring != "" {
-			initialOutput, err := s.waitForConsolePrompt(wsConn, promptSubstring, promptTimeout)
+		if prompt != "" {
+			initialOutput, err := s.waitForConsolePrompt(wsConn, prompt, promptTimeout)
 			if err != nil {
 				resp.Body.Close()
 				wsConn.Close()
