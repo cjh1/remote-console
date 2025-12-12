@@ -81,6 +81,9 @@ func (cs *credsService) GetPasswordsWithRetries(bmcXNames []string, maxTries, wa
 	for numTries := 0; numTries < maxTries; numTries++ {
 		log.Printf("Get passwords with retry: %d", numTries)
 		passwords, err = getPasswords(cs.config, bmcXNames)
+
+		log.Printf("Passwords: %#v", passwords)
+
 		if err != nil {
 			log.Printf("Error retrieving passwords: %v", err)
 		}
@@ -97,7 +100,7 @@ func (cs *credsService) GetPasswordsWithRetries(bmcXNames []string, maxTries, wa
 			log.Printf("Retrieved all passwords")
 			break
 		}
-		log.Printf("Attempt %d - Only retrieved %d of %d River creds from vault, waiting and trying again...",
+		log.Printf("Attempt %d - Only retrieved %d of %d creds from vault, waiting and trying again...",
 			numTries, len(passwords), len(bmcXNames))
 		time.Sleep(time.Duration(waitSecs) * time.Second)
 	}

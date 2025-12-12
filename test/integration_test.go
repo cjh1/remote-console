@@ -151,6 +151,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	// TODO SMD will not create the entry in Vault if the password is empty, so we have to set it here manually.
 	// We may need another approach later.
 	err = setConsoleCredentials(s.ctx, s.rcsNetwork.Name, "x0c0s1b0", "ADMIN", "")
+	err = setConsoleCredentials(s.ctx, s.rcsNetwork.Name, "x0c0s1b0n0", "ADMIN", "")
 	require.NoError(s.T(), err)
 
 	// Start SSH password server
@@ -384,6 +385,11 @@ func (s *IntegrationTestSuite) dialWebSocket(wsURL url.URL) (*websocket.Conn, *h
 	return wsConn, resp, nil
 }
 
+type fileLogConsumer struct {
+	writer io.Writer
+	mu     sync.Mutex
+}
+
 func (s *IntegrationTestSuite) streamContainerLogs(name string, container testcontainers.Container, destPath string) {
 	go func() {
 		file, err := os.Create(destPath)
@@ -409,11 +415,6 @@ func (s *IntegrationTestSuite) streamContainerLogs(name string, container testco
 
 		file.Close()
 	}()
-}
-
-type fileLogConsumer struct {
-	writer io.Writer
-	mu     sync.Mutex
 }
 
 func (c *fileLogConsumer) Accept(log testcontainers.Log) {
@@ -499,27 +500,16 @@ func (s *IntegrationTestSuite) waitForConsoleRemoval(nodeID string, timeout time
 
 func (s *IntegrationTestSuite) TestConsoleTail() {
 	for _, fixture := range consoleFixtures {
-		fixture := fixture
 		s.Run(fixture.Name, func() {
 			wsURL, err := s.tailWebSocketURL(fixture.NodeID, "")
 			s.Require().NoError(err)
-
-			wsConn, resp, err := s.dialWebSocket(wsURL)
-			s.Require().NoError(err)
-			initialOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
-			if fixture.InitialLogMarker != "" {
-				s.Require().Contains(initialOutput, fixture.InitialLogMarker,
-					"Expected to find initial marker for %s", fixture.Name)
-			}
-			resp.Body.Close()
-			wsConn.Close()
 
 			msg := uniqueMessage("tail-basic-" + fixture.Name)
 			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
 			s.Require().NoError(err)
 			s.T().Logf("%s console echo to pts (exit code %d): %s", fixture.Name, exitCode, output)
 
-			wsConn, resp, err = s.dialWebSocket(wsURL)
+			wsConn, resp, err := s.dialWebSocket(wsURL)
 			s.Require().NoError(err)
 			defer resp.Body.Close()
 			defer wsConn.Close()
@@ -532,7 +522,6 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 
 func (s *IntegrationTestSuite) TestConsoleTailFollow() {
 	for _, fixture := range consoleFixtures {
-		fixture := fixture
 		s.Run(fixture.Name, func() {
 			wsURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
 			s.Require().NoError(err)
@@ -544,7 +533,7 @@ func (s *IntegrationTestSuite) TestConsoleTailFollow() {
 
 			if fixture.InitialLogMarker != "" {
 				_, err = s.readWebSocketUntil(wsConn, fixture.InitialLogMarker, tailMessageTimeout)
-				s.Require().NoError(err, "Expected to find initial marker for %s", fixture.Name)
+				s.Require().NoError(err, "Expected console readiness marker for %s", fixture.Name)
 			}
 
 			testMsg := uniqueMessage("tail-follow-" + fixture.Name)
@@ -560,7 +549,6 @@ func (s *IntegrationTestSuite) TestConsoleTailFollow() {
 
 func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
 	for _, fixture := range consoleFixtures {
-		fixture := fixture
 		s.Run(fixture.Name, func() {
 			wsURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
 			s.Require().NoError(err)
@@ -599,8 +587,6 @@ func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
 
 func (s *IntegrationTestSuite) TestConsoleTailHistoryFollowConcurrent() {
 	for _, fixture := range consoleFixtures {
-		fixture := fixture
-
 		s.Run(fixture.Name, func() {
 			historyURL, err := s.tailWebSocketURL(fixture.NodeID, "lines=50&follow=true")
 			s.Require().NoError(err)
@@ -634,7 +620,7 @@ func (s *IntegrationTestSuite) TestConsoleTailHistoryFollowConcurrent() {
 			s.Require().NoError(err, "history+follow connection did not see broadcast message")
 
 			_, err = s.readWebSocketUntil(followConn, msg, 30*time.Second)
-			s.Require().NoError(err, "follow-only connection did not see broadcast message while history+follow connection was active")
+			s.Require().NoError(err, "follow-only connection did not see broadcast message")
 		})
 	}
 }
@@ -735,28 +721,12 @@ func (s *IntegrationTestSuite) TestConsoleRemoval() {
 
 func (s *IntegrationTestSuite) TestConsoleTailLines() {
 	for _, fixture := range consoleFixtures {
-		fixture := fixture
 		s.Run(fixture.Name, func() {
-			followURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
-			s.Require().NoError(err)
-
 			msg := uniqueMessage("tail-lines-" + fixture.Name)
 
-			func() {
-				wsConn, resp, err := s.dialWebSocket(followURL)
-				s.Require().NoError(err)
-				defer resp.Body.Close()
-				defer wsConn.Close()
-
-				if fixture.InitialLogMarker != "" {
-					_, err = s.readWebSocketUntil(wsConn, fixture.InitialLogMarker, tailMessageTimeout)
-					s.Require().NoError(err, "Expected to find initial output for %s", fixture.Name)
-				}
-
-				exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
-				s.Require().NoError(err)
-				s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
-			}()
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+			s.Require().NoError(err)
+			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
 
 			linesURL, err := s.tailWebSocketURL(fixture.NodeID, "lines=1")
 			s.Require().NoError(err)
@@ -778,26 +748,11 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 	for _, fixture := range consoleFixtures {
 		fixture := fixture
 		s.Run(fixture.Name, func() {
-			followURL, err := s.tailWebSocketURL(fixture.NodeID, "follow=true")
-			s.Require().NoError(err)
-
 			msg := uniqueMessage("tail-lines-initial-" + fixture.Name)
 
-			func() {
-				wsConn, resp, err := s.dialWebSocket(followURL)
-				s.Require().NoError(err)
-				defer resp.Body.Close()
-				defer wsConn.Close()
-
-				if fixture.InitialLogMarker != "" {
-					_, err = s.readWebSocketUntil(wsConn, fixture.InitialLogMarker, tailMessageTimeout)
-					s.Require().NoError(err, "Expected to find initial output for %s", fixture.Name)
-				}
-
-				exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
-				s.Require().NoError(err)
-				s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
-			}()
+			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
+			s.Require().NoError(err)
+			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
 
 			linesFollowURL, err := s.tailWebSocketURL(fixture.NodeID, "lines=1&follow=true")
 			s.Require().NoError(err)
@@ -807,6 +762,11 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			defer followResp.Body.Close()
 			defer followConn.Close()
 
+			if fixture.InitialLogMarker != "" {
+				_, err = s.readWebSocketUntil(followConn, fixture.InitialLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "follow connection did not see readiness marker for %s", fixture.Name)
+			}
+
 			tailOutput, err := s.readWebSocketUntil(followConn, msg, 30*time.Second)
 			s.Require().NoError(err, "Expected to find initial test message in tail output")
 			lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
@@ -814,7 +774,7 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			s.Require().Contains(lines[0], msg, "Test message not found in console output")
 
 			followMsg := uniqueMessage("tail-lines-follow-" + fixture.Name)
-			exitCode, output, err := s.broadcastConsoleMessage(fixture, followMsg)
+			exitCode, output, err = s.broadcastConsoleMessage(fixture, followMsg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent follow-up message to %s console (exit code %d): %s", fixture.Name, exitCode, output)
 
