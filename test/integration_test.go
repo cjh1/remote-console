@@ -496,9 +496,20 @@ func (s *IntegrationTestSuite) waitForConsoleRemoval(nodeID string, timeout time
 func (s *IntegrationTestSuite) TestConsoleTail() {
 	for _, fixture := range consoleFixtures {
 		s.Run(fixture.name, func() {
-			wsURL, err := s.tailWebSocketURL(fixture.nodeID, "")
+			followURL, err := s.tailWebSocketURL(fixture.nodeID, "follow=true")
 			s.Require().NoError(err)
 
+			followConn, followResp, err := s.dialWebSocket(followURL)
+			s.Require().NoError(err)
+			defer followResp.Body.Close()
+			defer followConn.Close()
+
+			if fixture.readyLogMarker != "" {
+				_, err = s.readWebSocketUntil(followConn, fixture.readyLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "Expected console readiness marker for %s", fixture.name)
+			}
+
+			wsURL, err := s.tailWebSocketURL(fixture.nodeID, "")
 			msg := uniqueMessage("tail-basic-" + fixture.name)
 			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
 			s.Require().NoError(err)
