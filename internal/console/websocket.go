@@ -70,36 +70,43 @@ func (ws *webSocketSession) close() {
 }
 
 func (ws *webSocketSession) writePump(ctx context.Context) {
-	ticker := time.NewTicker(pingPeriod)
-	defer ticker.Stop()
-	defer ws.conn.Close()
+    ticker := time.NewTicker(pingPeriod)
+    defer ticker.Stop()
+    defer ws.conn.Close()
 
-	for {
-		select {
+	cancelled := false
+
+    for {
+        select {
 		case <-ctx.Done():
-			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			ws.conn.WriteMessage(websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-			return
+			if !cancelled {
+				cancelled = true
+                // Allow outstanding messages to flush before we close the socket.
+                ws.close()
+            }
 		case msg, ok := <-ws.send:
-			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				ws.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
-			if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
-				log.Printf("WebSocket write failed for %s: %v", ws.name, err)
-				ws.handleClose()
-				return
-			}
+            ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+            if !ok {
+                ws.conn.WriteMessage(websocket.CloseMessage, []byte{})
+                return
+            }
+            if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
+                log.Printf("WebSocket write failed for %s: %v", ws.name, err)
+                ws.handleClose()
+                return
+            }
 		case <-ticker.C:
-			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("WebSocket ping failed for %s: %v", ws.name, err)
-				ws.handleClose()
-				return
-			}
-		}
+			// If we've been cancelled, don't send any more pings.
+			if cancelled {
+                continue
+            }
+            ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+            if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+                log.Printf("WebSocket ping failed for %s: %v", ws.name, err)
+                ws.handleClose()
+                return
+            }
+        }
 	}
 }
 

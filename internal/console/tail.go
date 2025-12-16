@@ -46,9 +46,21 @@ func (cts *consoleTailSession) close() {
 	cts.closeOnce.Do(func() {
 		if cts.tail != nil {
 			log.Printf("cleanup tail for %s", cts.nodeID)
+			// Print out the last 10 lines of the file before closing
+			filename := fmt.Sprintf("%s/console.%s", cts.consoleLogsPath, cts.nodeID)
+			lastLines, _, err := readLastNLines(filename, 10)
+			if err != nil {
+				log.Printf("Error reading last lines from console log: %v", err)
+			} else {
+				for _, line := range lastLines {
+					log.Printf("Last line: %s", line)
+				}
+			}
+			// end debug
+
 			cts.tail.Config.Poll = false
 			cts.tail.Cleanup()
-			err := cts.tail.Stop()
+			err = cts.tail.Stop()
 			if err != nil {
 				log.Printf("Error stopping tail: %v", err)
 			}
@@ -60,7 +72,7 @@ func (cts *consoleTailSession) close() {
 		log.Printf("Cancelled context for console tail session: %s", cts.nodeID)
 
 		cts.ws.close()
-
+	
 		log.Printf("Close completed for console tail session: %s", cts.nodeID)
 	})
 }
@@ -104,18 +116,19 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 
 			// Stream the line to the websocket
 			if line == nil {
-				log.Printf("Tailing console for '%s' complete", cts.nodeID)
+				log.Printf("Tailing console for '%s' complete (follow=%v)", cts.nodeID, follow)
 
 				cts.tail.Config.Poll = false
 				cts.tail.Cleanup()
 				cts.tail.Stop()
+				log.Printf("Tail loop exiting for '%s' (follow=%v)", cts.nodeID, follow)
 				return
 			}
 
 			// Add newline back (tail library strips it)
 			lineText := line.Text + "\n"
 			log.Printf("before write")
-			log.Printf("Sending line: %s", lineText)
+			log.Printf("Sending line:  follow: %v, %s", follow, lineText)
 			err := cts.writeMessage(websocket.TextMessage, []byte(lineText))
 			log.Printf("after write")
 			if err != nil {
@@ -195,7 +208,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
 		if err == nil {
 			for _, line := range lines {
-				fmt.Printf("Sending line: %s\n", line)
+				fmt.Printf("Sending line: follow: %v: %s\n", follow, line)
 				if err := cts.writeMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
 					log.Printf("Failed to send lines: %v", err)
 					cts.writeMessage(websocket.CloseMessage,

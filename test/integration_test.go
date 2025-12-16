@@ -3,8 +3,10 @@ package test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -338,15 +340,27 @@ func (s *IntegrationTestSuite) readWebSocketMessages(wsConn *websocket.Conn, tim
 	wsConn.SetReadDeadline(time.Now().Add(timeout))
 
 	var output strings.Builder
+	messageCount := 0
+	start := time.Now()
 	for {
 		_, message, err := wsConn.ReadMessage()
 		if err != nil {
-			s.T().Logf("WebSocket read ended: %v", err)
+			var closeErr *websocket.CloseError
+			isTimeout := false
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				isTimeout = true
+			}
+			if errors.As(err, &closeErr) {
+				s.T().Logf("WebSocket read saw close frame: %v", closeErr)
+			}
+			s.T().Logf("WebSocket read ended after %d messages (%s elapsed). timeout=%v err=%v", messageCount, time.Since(start), isTimeout, err)
 			break
 		}
 		msgStr := string(message)
 		s.T().Logf("Console: %s", msgStr)
+		s.T().Logf("Console (raw): %q", message)
 		output.WriteString(msgStr)
+		messageCount++
 	}
 	return output.String()
 }
@@ -496,6 +510,7 @@ func (s *IntegrationTestSuite) waitForConsoleRemoval(nodeID string, timeout time
 func (s *IntegrationTestSuite) TestConsoleTail() {
 	for _, fixture := range consoleFixtures {
 		s.Run(fixture.name, func() {
+			// First, wait for the console to be ready
 			followURL, err := s.tailWebSocketURL(fixture.nodeID, "follow=true")
 			s.Require().NoError(err)
 
@@ -509,18 +524,23 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 				s.Require().NoError(err, "Expected console readiness marker for %s", fixture.name)
 			}
 
+			// Send a message to the console and verify it's seen in the tail
 			wsURL, err := s.tailWebSocketURL(fixture.nodeID, "")
 			msg := uniqueMessage("tail-basic-" + fixture.name)
 			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
 			s.Require().NoError(err)
 			s.T().Logf("%s console echo to pts (exit code %d): %s", fixture.name, exitCode, output)
 
+			s.readWebSocketUntil(followConn, msg, tailMessageTimeout)
+
+			// Now, connect to the console and verify we can read the message
 			wsConn, resp, err := s.dialWebSocket(wsURL)
 			s.Require().NoError(err)
 			defer resp.Body.Close()
 			defer wsConn.Close()
 
 			tailOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
+			s.T().Logf("Console tail output: %s", tailOutput)
 			s.Require().Contains(tailOutput, msg, fmt.Sprintf("Expected to find '%s' in console output", msg))
 		})
 	}
@@ -728,6 +748,20 @@ func (s *IntegrationTestSuite) TestConsoleRemoval() {
 func (s *IntegrationTestSuite) TestConsoleTailLines() {
 	for _, fixture := range consoleFixtures {
 		s.Run(fixture.name, func() {
+			// First, wait for the console to be ready
+			followURL, err := s.tailWebSocketURL(fixture.nodeID, "follow=true")
+			s.Require().NoError(err)
+
+			followConn, followResp, err := s.dialWebSocket(followURL)
+			s.Require().NoError(err)
+			defer followResp.Body.Close()
+			defer followConn.Close()
+
+			if fixture.readyLogMarker != "" {
+				_, err = s.readWebSocketUntil(followConn, fixture.readyLogMarker, tailMessageTimeout)
+				s.Require().NoError(err, "Expected console readiness marker for %s", fixture.name)
+			}
+
 			msg := uniqueMessage("tail-lines-" + fixture.name)
 
 			exitCode, output, err := s.broadcastConsoleMessage(fixture, msg)
