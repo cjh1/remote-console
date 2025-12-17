@@ -24,8 +24,6 @@ type interactiveConsoleSession struct {
 	nodeID      string
 	doneOnce    sync.Once
 	processExit chan struct{}
-	ctx         context.Context
-	cancel      context.CancelFunc
 	ws          *webSocketSession
 }
 
@@ -56,21 +54,12 @@ func (s *interactiveConsoleSession) close() {
 			}
 		}
 
-		// // Give streamOutput a brief moment to drain any remaining buffered data
-		// // before closing the PTY
-		// time.Sleep(50 * time.Millisecond)
-
 		// Close PTY - this will cause streamOutput to exit
 		if s.ptmx != nil {
 			s.ptmx.Close()
 		}
 
-		// Cancel context to signal all goroutines after PTY is closed
-		// This ensures streamOutput/streamInput can complete their current operations
-		if s.cancel != nil {
-			s.cancel()
-		}
-
+		// Close WebSocket - this will cause streamInput to exit and cleanup WebSocket goroutines
 		if s.ws != nil {
 			s.ws.close()
 		}
@@ -101,7 +90,7 @@ func isEIO(err error) bool {
 }
 
 // streamOutput reads from PTY and writes to WebSocket
-func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
+func (s *interactiveConsoleSession) streamOutput(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	buf := make([]byte, 4096)
@@ -118,7 +107,7 @@ func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
 
 		if n > 0 {
 			log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
-			if err := s.writeMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+			if err := s.writeMessage(ctx, websocket.BinaryMessage, buf[:n]); err != nil {
 				// Don't log if WebSocket is already closed (happens during normal shutdown)
 				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) &&
 					err.Error() != "websocket: close sent" {
@@ -138,15 +127,6 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	s.ws.configureReadDeadlines()
 
 	for {
-		// TODO This can be removed
-		// Check context after processing any pending data
-		select {
-		case <-s.ctx.Done():
-			log.Printf("streamInput context cancelled for console: %s", s.nodeID)
-			return
-		default:
-		}
-
 		messageType, message, err := s.ws.readMessage()
 		if err != nil {
 			// Check if it's an unexpected close (not normal, going away, or abnormal)
@@ -170,21 +150,18 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	}
 }
 
-func (s *interactiveConsoleSession) writeMessage(messageType int, data []byte) error {
-	return s.ws.write(s.ctx, messageType, data)
+func (s *interactiveConsoleSession) writeMessage(ctx context.Context, messageType int, data []byte) error {
+	return s.ws.write(ctx, messageType, data)
 }
 
 func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
-	sessionCtx, cancel := context.WithCancel(ctx)
 	session := &interactiveConsoleSession{
 		nodeID:      nodeID,
 		processExit: make(chan struct{}),
-		ctx:         sessionCtx,
-		cancel:      cancel,
 	}
 
 	session.ws = newWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.close)
-	session.ws.start(sessionCtx)
+	session.ws.start(ctx)
 
 	// Start conman process with PTY
 	session.cmd = exec.Command("conman", nodeID)
@@ -194,7 +171,7 @@ func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *webs
 	session.ptmx, err = pty.Start(session.cmd)
 	if err != nil {
 		log.Printf("Failed to start conman with PTY: %v", err)
-		session.writeMessage(websocket.TextMessage, []byte("Error: Failed to start conman with PTY"))
+		session.writeMessage(ctx, websocket.TextMessage, []byte("Error: Failed to start conman with PTY"))
 		session.close()
 		return nil
 	}
@@ -255,7 +232,7 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go session.streamInput(&wg)
-	go session.streamOutput(&wg)
+	go session.streamOutput(ctx, &wg)
 
 	// Wait for I/O goroutines to complete
 	wg.Wait()
