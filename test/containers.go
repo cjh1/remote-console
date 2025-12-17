@@ -432,13 +432,14 @@ func startSSHKeyServer(ctx context.Context, network string, alias string, userna
 	})
 }
 
-// startIPMIServer starts an IPMI server
+// startIPMIServer starts an IPMI server TODO alias => hostname
 func startIPMIServer(ctx context.Context, network string, alias string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
 			Context:    "../ipmi_sim",
 			Dockerfile: "Dockerfile",
 		},
+		Hostname: alias,
 		Networks: []string{network},
 		NetworkAliases: map[string][]string{
 			network: {alias},

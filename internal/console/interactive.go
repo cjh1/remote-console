@@ -34,11 +34,6 @@ func (s *interactiveConsoleSession) close() {
 	s.doneOnce.Do(func() {
 		log.Printf("Starting close for console session: %s", s.nodeID)
 
-		// Cancel context to signal all goroutines
-		if s.cancel != nil {
-			s.cancel()
-		}
-
 		// Try graceful disconnect via ConMan escape sequence
 		if s.ptmx != nil {
 			log.Printf("Sending ConMan escape sequence (&.) to disconnect from console: %s", s.nodeID)
@@ -61,9 +56,19 @@ func (s *interactiveConsoleSession) close() {
 			}
 		}
 
-		// Close PTY
+		// // Give streamOutput a brief moment to drain any remaining buffered data
+		// // before closing the PTY
+		// time.Sleep(50 * time.Millisecond)
+
+		// Close PTY - this will cause streamOutput to exit
 		if s.ptmx != nil {
 			s.ptmx.Close()
+		}
+
+		// Cancel context to signal all goroutines after PTY is closed
+		// This ensures streamOutput/streamInput can complete their current operations
+		if s.cancel != nil {
+			s.cancel()
 		}
 
 		if s.ws != nil {
@@ -101,32 +106,34 @@ func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
 
 	buf := make([]byte, 4096)
 	for {
+		// Check context after processing any pending data
 		select {
 		case <-s.ctx.Done():
-			s.close()
+			log.Printf("streamOutput context cancelled for console: %s", s.nodeID)
 			return
 		default:
-			n, err := s.ptmx.Read(buf)
-			if err != nil {
-				// Don't log I/O errors - they're expected when the process is killed
-				if err != io.EOF && !isEIO(err) {
-					log.Printf("Error reading from PTY: %v", err)
-				}
-				s.close()
-				return
-			}
+		}
 
-			if n > 0 {
-				log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
-				if err := s.writeMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-					// Don't log if WebSocket is already closed (happens during normal shutdown)
-					if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) &&
-						err.Error() != "websocket: close sent" {
-						log.Printf("Failed to write to WebSocket: %v", err)
-					}
-					s.close()
-					return
+		n, err := s.ptmx.Read(buf)
+		if err != nil {
+			// Don't log I/O errors - they're expected when the process is killed
+			if err != io.EOF && !isEIO(err) {
+				log.Printf("Error reading from PTY: %v", err)
+			}
+			// PTY closed, exit gracefully without calling close() (close() already closed PTY)
+			return
+		}
+
+		if n > 0 {
+			log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
+			if err := s.writeMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+				// Don't log if WebSocket is already closed (happens during normal shutdown)
+				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) &&
+					err.Error() != "websocket: close sent" {
+					log.Printf("Failed to write to WebSocket: %v", err)
 				}
+				// WebSocket write failed, exit gracefully
+				return
 			}
 		}
 	}
@@ -139,30 +146,32 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	s.ws.configureReadDeadlines()
 
 	for {
+		// Check context after processing any pending data
 		select {
 		case <-s.ctx.Done():
-			s.close()
+			log.Printf("streamInput context cancelled for console: %s", s.nodeID)
 			return
 		default:
-			messageType, message, err := s.ws.readMessage()
-			if err != nil {
-				// Check if it's an unexpected close (not normal, going away, or abnormal)
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("WebSocket unexpected close error: %v", err)
-				} else {
-					log.Printf("WebSocket closed normally for console: %s", s.nodeID)
-				}
+		}
+
+		messageType, message, err := s.ws.readMessage()
+		if err != nil {
+			// Check if it's an unexpected close (not normal, going away, or abnormal)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("WebSocket unexpected close error: %v", err)
+			} else {
+				log.Printf("WebSocket closed normally for console: %s", s.nodeID)
+			}
+			s.close()
+			return
+		}
+
+		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
+			// Write user input to PTY
+			if _, err := s.ptmx.Write(message); err != nil {
+				log.Printf("Failed to write to PTY: %v", err)
 				s.close()
 				return
-			}
-
-			if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
-				// Write user input to PTY
-				if _, err := s.ptmx.Write(message); err != nil {
-					log.Printf("Failed to write to PTY: %v", err)
-					s.close()
-					return
-				}
 			}
 		}
 	}

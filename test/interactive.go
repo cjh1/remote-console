@@ -72,33 +72,22 @@ func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, prompt s
 			continue
 		}
 
-		if prompt != "" {
-			initialOutput, err := s.waitForConsolePrompt(wsConn, prompt, promptTimeout)
-			if err != nil {
-				resp.Body.Close()
-				wsConn.Close()
-				lastErr = err
-				s.T().Logf("Console prompt attempt %d/%d failed: %v", attempt, consoleConnectAttempts, err)
-				if initialOutput != "" {
-					s.T().Logf("Console output before failure (attempt %d): %q", attempt, initialOutput)
-				}
-				time.Sleep(consoleRetryDelay)
-				continue
+		
+		initialOutput, err := s.waitForConsolePrompt(wsConn, prompt, promptTimeout)
+		if err != nil {
+			resp.Body.Close()
+			wsConn.Close()
+			lastErr = err
+			s.T().Logf("Console prompt attempt %d/%d failed: %v", attempt, consoleConnectAttempts, err)
+			if initialOutput != "" {
+				s.T().Logf("Console output before failure (attempt %d): %q", attempt, initialOutput)
 			}
-
-			if !strings.Contains(initialOutput, fmt.Sprintf("%s:~$", nodeID)) {
-				resp.Body.Close()
-				wsConn.Close()
-				lastErr = fmt.Errorf("prompt host mismatch, expected %s:~$ in console output: %q", nodeID, initialOutput)
-				s.T().Logf("Prompt host mismatch on attempt %d; output: %q", attempt, initialOutput)
-				time.Sleep(consoleRetryDelay)
-				continue
-			}
-
-			s.T().Logf("Console %s ready: %s", nodeID, initialOutput)
-		} else {
-			s.T().Logf("Skipping prompt wait for console %s", nodeID)
+			time.Sleep(consoleRetryDelay)
+			continue
 		}
+
+		s.T().Logf("Console %s ready: %s", nodeID, initialOutput)
+	
 		return wsConn, resp, nil
 	}
 

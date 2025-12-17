@@ -40,7 +40,7 @@ var consoleFixtures = []consoleFixture{
 		nodeID:         "x0c0s2b0",
 		containerKey:   "ipmi",
 		readyLogMarker: "<ConMan> Console [x0c0s2b0] connected",
-		prompt:         "",
+		prompt:         "/ # ",
 		broadcastCmd: func(msg string) []string {
 			return []string{"sh", "-c", fmt.Sprintf("printf \"echo %s\n\" > /dev/vtty", msg)}
 		},
