@@ -106,14 +106,6 @@ func (s *interactiveConsoleSession) streamOutput(wg *sync.WaitGroup) {
 
 	buf := make([]byte, 4096)
 	for {
-		// Check context after processing any pending data
-		select {
-		case <-s.ctx.Done():
-			log.Printf("streamOutput context cancelled for console: %s", s.nodeID)
-			return
-		default:
-		}
-
 		n, err := s.ptmx.Read(buf)
 		if err != nil {
 			// Don't log I/O errors - they're expected when the process is killed
@@ -146,6 +138,7 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	s.ws.configureReadDeadlines()
 
 	for {
+		// TODO This can be removed
 		// Check context after processing any pending data
 		select {
 		case <-s.ctx.Done():
