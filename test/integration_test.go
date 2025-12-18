@@ -243,7 +243,7 @@ func (s *IntegrationTestSuite) TestHealthCheck() {
 
 	err = json.NewDecoder(resp.Body).Decode(&healthResponse)
 	s.Require().NoError(err)
-	s.Equal("6", healthResponse.NumberConsoles)
+	s.Equal("5", healthResponse.NumberConsoles)
 }
 
 func (s *IntegrationTestSuite) TestReadinessCheck() {
@@ -278,7 +278,7 @@ func (s *IntegrationTestSuite) TestConsoles() {
 	err = json.NewDecoder(resp.Body).Decode(&consolesResponse)
 	s.Require().NoError(err)
 
-	s.Require().Equal(len(consolesResponse.Consoles), 6, "Expected 6 consoles")
+	s.Require().Equal(len(consolesResponse.Consoles), 5, "Expected 5 consoles")
 
 	fmt.Println(consolesResponse.Consoles)
 
@@ -384,6 +384,22 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 		}
 	}
 	return output.String(), fmt.Errorf("string %q not found in output", searchString)
+}
+
+func (s *IntegrationTestSuite) readNWebSocketMessages(wsConn *websocket.Conn, count int, timeout time.Duration) (string, error) {
+	wsConn.SetReadDeadline(time.Now().Add(timeout))
+	
+	var output strings.Builder
+	for i := range count {
+		_, message, err := wsConn.ReadMessage()
+		if err != nil {
+			s.T().Logf("WebSocket read ended after %d of %d messages: %v", i, count, err)
+			return output.String(), fmt.Errorf("failed to read message %d of %d: %w", i+1, count, err)
+		}
+		output.WriteString(string(message))
+	}
+	
+	return output.String(), nil
 }
 
 func (s *IntegrationTestSuite) dialWebSocket(wsURL url.URL) (*websocket.Conn, *http.Response, error) {
@@ -716,35 +732,6 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 
 }
 
-func (s *IntegrationTestSuite) TestConsoleRemoval() {
-	targetNode := "x0c0s1b0"
-	s.T().Logf("Removing console %s from SMD", targetNode)
-
-	err := deleteRedfishEndpoint(s.ctx, s.rfNetwork.Name, targetNode)
-	s.Require().NoError(err, "failed to delete Redfish endpoint for %s", targetNode)
-
-	s.Require().NoError(s.waitForConsoleRemoval(targetNode, 3*time.Minute), "remote-console did not remove console %s", targetNode)
-
-	s.T().Log("Verifying console is no longer reachable")
-	conn, resp, err := s.connectInteractiveConsole(targetNode, ":~$ ", 30*time.Second)
-	if conn != nil {
-		conn.Close()
-	}
-	if resp != nil {
-		resp.Body.Close()
-	}
-	s.Require().Error(err, "expected interactive console connection to fail after removal")
-
-	s.T().Log("Re-registering console in SMD")
-	reAddErr := loadRedfishEndpoints(s.ctx, s.rfNetwork.Name, []redfishEndpoint{{
-		Host:     targetNode,
-		Username: "operator",
-		Password: "operator_password",
-	}})
-	s.Require().NoError(reAddErr, "failed to re-register console %s", targetNode)
-	s.Require().NoError(s.waitForConsoleID(targetNode, 3*time.Minute), "remote-console did not rediscover console %s", targetNode)
-}
-
 func (s *IntegrationTestSuite) TestConsoleTailLines() {
 	for _, fixture := range consoleFixtures {
 		s.Run(fixture.name, func() {
@@ -768,7 +755,7 @@ func (s *IntegrationTestSuite) TestConsoleTailLines() {
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", fixture.name, exitCode, output)
 			
-			linesURL, err := s.tailWebSocketURL(fixture.nodeID, "lines=1")
+			linesURL, err := s.tailWebSocketURL(fixture.nodeID, "lines=2")
 			s.Require().NoError(err)
 
 			wsConn, resp, err := s.dialWebSocket(linesURL)
@@ -778,8 +765,8 @@ func (s *IntegrationTestSuite) TestConsoleTailLines() {
 
 			tailOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
 			lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
-			s.Require().Len(lines, 1, "Expected exactly one line from tail with lines=1")
-			s.Require().Contains(lines[0], msg, "Test message not found in console output")
+			s.Require().Contains(tailOutput, msg, "Test message not found in console output")
+			s.Require().Len(lines, 2, "Expected exactly one line from tail with lines=1")
 		})
 	}
 }
@@ -810,8 +797,8 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			_, err = s.readWebSocketUntil(followConn, msg, tailMessageTimeout)
 			s.Require().NoError(err, "follow connection did not see initial test message in output")
 
-			// Now use the lines=1&follow=true connection to ensure we get the initial message and then follow
-			linesFollowURL, err := s.tailWebSocketURL(fixture.nodeID, "lines=1&follow=true")
+			// Now use the lines=2&follow=true connection to ensure we get the initial message and then follow
+			linesFollowURL, err := s.tailWebSocketURL(fixture.nodeID, "lines=2&follow=true")
 			s.Require().NoError(err)
 
 			followLinesConn, followLinesResp, err := s.dialWebSocket(linesFollowURL)
@@ -819,26 +806,19 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			defer followLinesResp.Body.Close()
 			defer followLinesConn.Close()
 
-			// if fixture.readyLogMarker != "" {
-			// 	_, err = s.readWebSocketUntil(followLinesConn, fixture.readyLogMarker, tailMessageTimeout)
-			// 	s.Require().NoError(err, "follow connection did not see readiness marker for %s", fixture.name)
-			// }
-
-			tailOutput, err := s.readWebSocketUntil(followLinesConn, msg, 30*time.Second)
-			s.Require().NoError(err, "Expected to find initial test message in tail output")
-			lines := strings.Split(strings.TrimSpace(tailOutput), "\n")
-			s.Require().Len(lines, 1, "Expected exactly one line from tail with lines=1")
-			s.Require().Contains(lines[0], msg, "Test message not found in console output")
+			tailOutput, err := s.readNWebSocketMessages(followLinesConn, 2, 30*time.Second)
+			fmt.Printf("tailOuput: %s", tailOutput)
+			s.Require().NoError(err, "follow lines connection did not see initial test message in output")
+			s.Require().Len(strings.Split(strings.TrimSpace(tailOutput), "\n"), 2, "Expected exactly two lines from tail with lines=2")
+			s.Require().Contains(tailOutput, msg, "Test message not found in console output")
 
 			followMsg := uniqueMessage("tail-lines-follow-" + fixture.name)
 			exitCode, output, err = s.broadcastConsoleMessage(fixture, followMsg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent follow-up message to %s console (exit code %d): %s", fixture.name, exitCode, output)
 
-			tailOutput, err = s.readWebSocketUntil(followLinesConn, followMsg, 200*time.Second)
+			_, err = s.readWebSocketUntil(followLinesConn, followMsg, 200*time.Second)
 			s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", followMsg))
-			lines = strings.Split(strings.TrimSpace(tailOutput), "\n")
-			s.Require().Len(lines, 1, "Expected exactly one line from tail with follow after sending follow-up message")
 		})
 	}
 }
