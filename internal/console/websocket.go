@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -26,6 +27,8 @@ type webSocketSession struct {
 	closeOnce sync.Once
 	name      string
 	onClose   func()
+	// TODO is there a better way to do this?
+	closed    atomic.Bool
 }
 
 func newWebSocketSession(conn *websocket.Conn, name string, onClose func()) *webSocketSession {
@@ -54,6 +57,15 @@ func (ws *webSocketSession) readMessage() (int, []byte, error) {
 }
 
 func (ws *webSocketSession) write(ctx context.Context, messageType int, data []byte) error {
+	if ws.closed.Load() {
+		return websocket.ErrCloseSent
+	}
+	// if send channel if close
+	val, ok := <-ws.send
+	if !ok {
+		return websocket.ErrCloseSent
+	} 
+
 	payload := append([]byte(nil), data...)
 	select {
 	case <-ctx.Done():
@@ -66,6 +78,7 @@ func (ws *webSocketSession) write(ctx context.Context, messageType int, data []b
 func (ws *webSocketSession) close() {
 	ws.closeOnce.Do(func() {
 		log.Printf("Closing WebSocket session: %s", ws.name)
+		ws.closed.Store(true)
 		// Close send channel - this will cause writePump to exit
 		close(ws.send)
 	})

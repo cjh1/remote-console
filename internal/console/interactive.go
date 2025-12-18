@@ -16,6 +16,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+	"github.com/nxadm/tail/ratelimiter"
 )
 
 // interactiveConsoleSession manages the lifecycle of an interactive console session
@@ -27,6 +28,7 @@ type interactiveConsoleSession struct {
 	doneOnce    sync.Once
 	processExit chan struct{}
 	ws          *webSocketSession
+	rateLimiter *ratelimiter.LeakyBucket // Rate limit console output
 }
 
 // close performs graceful shutdown of the console session
@@ -45,19 +47,10 @@ func (s *interactiveConsoleSession) close() {
 			time.Sleep(100 * time.Millisecond) // Brief pause to let it process
 		}
 
-		// Ensure process termination
+		// Signal process termination (let monitorProcess reap it)
 		if s.cmd != nil && s.cmd.Process != nil {
-			timer := time.NewTimer(2 * time.Second)
-			select {
-			case <-s.processExit:
-				timer.Stop()
-				log.Printf("Conman process exited gracefully for console: %s", s.nodeID)
-			case <-timer.C:
-				log.Printf("Force killing conman process for console: %s", s.nodeID)
-				s.cmd.Process.Kill()
-				// Wait for process to be reaped
-				<-s.processExit
-			}
+			log.Printf("Sending SIGTERM to conman process for console: %s", s.nodeID)
+			s.cmd.Process.Signal(syscall.SIGTERM)
 		}
 
 		// Close PTY - this will cause streamOutput to exit
@@ -84,6 +77,14 @@ func (s *interactiveConsoleSession) monitorProcess(ctx context.Context) {
 		s.cmd.Wait()
 		log.Printf("Conman process exited for console: %s", s.nodeID)
 		close(s.processExit)
+		
+		// Check if context is cancelled (session is closing)
+		select {
+		case <-ctx.Done():
+			log.Printf("Context cancelled, not reconnecting: %s", s.nodeID)
+			return
+		default:
+		}
 		
 		// Check if the node still exists (might have been updated/changed)
 		if !validateNode(s.nodeID) {
@@ -175,7 +176,7 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
 			// Success!
 			log.Printf("Successfully reconnected conman for console: %s", s.nodeID)
 			
-			// Check context again before continuing
+			// Check context and WebSocket status before starting new goroutines
 			select {
 			case <-ctx.Done():
 				log.Printf("Context cancelled after reconnecting conman for %s", s.nodeID)
@@ -255,6 +256,14 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context, wg *sync.W
 
 		if n > 0 {
 			log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
+			
+			// Apply rate limiting (convert bytes to KB for rate limiter units)
+			// kb := uint16((n + 1023) / 1024) // Round up to nearest KB
+			// for !s.rateLimiter.Pour(kb) {
+			// 	log.Printf("Rate limit reached for console %s, waiting for capacity", s.nodeID)
+			// 	time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
+			// }
+			
 			if err := s.writeMessage(ctx, websocket.BinaryMessage, buf[:n]); err != nil {
 				// Don't log if WebSocket is already closed (happens during normal shutdown)
 				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) &&
@@ -315,7 +324,8 @@ func (s *interactiveConsoleSession) writeMessage(ctx context.Context, messageTyp
 
 func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
 	session := &interactiveConsoleSession{
-		nodeID: nodeID,
+		nodeID:      nodeID,
+		rateLimiter: ratelimiter.NewLeakyBucket(10240, 1*time.Millisecond), // Rate limit in KB units: 10MB burst, 1MB/sec sustained
 	}
 
 	session.ws = newWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.close)

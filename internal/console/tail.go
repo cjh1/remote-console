@@ -12,11 +12,11 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"time"
+	//"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail"
-	"github.com/nxadm/tail/ratelimiter"
+	//"github.com/nxadm/tail/ratelimiter"
 )
 
 type consoleTailSession struct {
@@ -250,7 +250,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		MustExist:   false, // If file doesn't exist keep trying
 		Poll:        true,  // Poll instead of using inotify -- inotify may not work on all filesystems
 		Logger:      tail.DiscardingLogger,
-		RateLimiter: ratelimiter.NewLeakyBucket(100, 10*time.Millisecond), // Rate limit to 100 lines per second using leaky bucket
+		//RateLimiter: ratelimiter.NewLeakyBucket(1000, 1*time.Millisecond), // Rate limit to 1000 lines per second using leaky bucket
 	}
 
 	// Only set ReOpen to true if we are following the file
