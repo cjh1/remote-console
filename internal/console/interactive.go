@@ -78,18 +78,26 @@ func (s *interactiveConsoleSession) close() {
 }
 
 // monitorProcess watches for process exit and attempts reconnection if node still exists
+// This runs in a loop, monitoring each new process after successful reconnection
 func (s *interactiveConsoleSession) monitorProcess(ctx context.Context) {
-	s.cmd.Wait()
-	log.Printf("Conman process exited for console: %s", s.nodeID)
-	close(s.processExit)
-	
-	// Check if the node still exists (might have been updated/changed)
-	if validateNode(s.nodeID) {
+	for {
+		s.cmd.Wait()
+		log.Printf("Conman process exited for console: %s", s.nodeID)
+		close(s.processExit)
+		
+		// Check if the node still exists (might have been updated/changed)
+		if !validateNode(s.nodeID) {
+			log.Printf("Node %s no longer exists, closing session", s.nodeID)
+			s.close()
+			return
+		}
+		
 		log.Printf("Node %s still exists, attempting to reconnect...", s.nodeID)
-		s.reconnect(ctx)
-	} else {
-		log.Printf("Node %s no longer exists, closing session", s.nodeID)
-		s.close()
+		if !s.reconnect(ctx) {
+			// Reconnection failed or was cancelled
+			return
+		}
+		// Successfully reconnected, loop back to monitor the new process
 	}
 }
 
@@ -128,13 +136,23 @@ func (s *interactiveConsoleSession) startConmanProcess() error {
 }
 
 // reconnect attempts to restart the conman process and reconnect streams
-func (s *interactiveConsoleSession) reconnect(ctx context.Context) {
+// Returns true if reconnection succeeded, false if it failed or was cancelled
+func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		log.Printf("Context cancelled before reconnection for %s", s.nodeID)
+		s.close()
+		return false
+	default:
+	}
+	
 	// Notify user via WebSocket
 	reconnectMsg := fmt.Sprintf("\n[Reconnecting to %s...]\n", s.nodeID)
 	if err := s.writeMessage(ctx, websocket.TextMessage, []byte(reconnectMsg)); err != nil {
 		log.Printf("Failed to send reconnect message: %v", err)
 		s.close()
-		return
+		return false
 	}
 
 	// Close old PTY if it exists
@@ -156,22 +174,25 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) {
 		if err := s.startConmanProcess(); err == nil {
 			// Success!
 			log.Printf("Successfully reconnected conman for console: %s", s.nodeID)
-			msg := fmt.Sprintf("\n[Reconnected to %s]\n", s.nodeID)
-			if err := s.writeMessage(ctx, websocket.TextMessage, []byte(msg)); err != nil {
-				log.Printf("Failed to send reconnected message: %v", err)
+			
+			// Check context again before continuing
+			select {
+			case <-ctx.Done():
+				log.Printf("Context cancelled after reconnecting conman for %s", s.nodeID)
 				s.close()
-				return
+				return false
+			default:
 			}
 
 			// Restart output streaming
+			// The console output itself will indicate when we're truly connected
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go s.streamOutput(ctx, &wg)
 			// Note: streamInput is already running and will continue to work with the new PTY
 			
-			// Restart monitoring - this will handle if conman exits again
-			go s.monitorProcess(ctx)
-			return
+			// Return true - monitorProcess will continue monitoring this new process
+			return true
 		} else {
 			log.Printf("Failed to start conman (attempt %d): %v", attempt, err)
 		}
@@ -183,11 +204,11 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) {
 			errorMsg := fmt.Sprintf("\r\n[Reconnection failed after %d attempts]\r\n", attempt)
 			s.writeMessage(ctx, websocket.TextMessage, []byte(errorMsg))
 			s.close()
-			return
+			return false
 		case <-ctx.Done():
 			log.Printf("Context cancelled during reconnection for %s", s.nodeID)
 			s.close()
-			return
+			return false
 		// Wait before next retry
 		case <-time.After(retryDelay):
 		}
@@ -357,7 +378,7 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Started conman process for console: %s", nodeID)
 
-	// Monitor process exit
+	// Monitor process exit for reconnection attempts
 	go session.monitorProcess(ctx)
 
 	// Start I/O goroutines

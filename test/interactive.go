@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -147,5 +148,164 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveTail() {
 			_, err = s.readWebSocketUntil(wsConn, msg, 30*time.Second)
 			s.Require().NoError(err, "Expected to find broadcast message in console output")
 		})
+	}
+}
+
+func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
+	// Use existing console from SetupSuite
+	existingNodeID := "x0c0s0b0"
+	promptTimeout := 90 * time.Second
+
+	// Connect to interactive console
+	wsConn, resp, err := s.connectInteractiveConsole(existingNodeID, ":~$ ", promptTimeout)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	// Run hostname command and validate console is working before triggering reconnection
+	s.T().Log("Running initial hostname command to verify console is working")
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
+	s.Require().NoError(err, "Error sending hostname command")
+
+	expectedHostLine := existingNodeID + "\r\n"
+	hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output from console")
+	s.Require().Contains(hostnameOutput, expectedHostLine, "Expected hostname in output")
+	s.Require().NotContains(hostnameOutput, "[Reconnecting", "Console should not be reconnecting initially")
+	s.Require().NotContains(hostnameOutput, "Connection refused", "Console should be connected without errors")
+	s.T().Logf("Initial hostname output: %s", hostnameOutput)
+
+	// Give the console a moment to stabilize
+	time.Sleep(2 * time.Second)
+
+	// Add a new node to trigger conmand restart
+	newNodeID := "x0c0s10b0"
+	s.T().Logf("Adding new node %s to trigger conmand restart", newNodeID)
+	
+	authConfig := defaultAuthConfig
+	rfContainer, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, newNodeID, "ssh", &authConfig)
+	s.Require().NoError(err)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := rfContainer.Terminate(ctx); err != nil {
+			s.T().Logf("Warning: failed to terminate Redfish emulator %s: %v", newNodeID, err)
+		}
+	}()
+
+	sshContainer, err := startSSHPasswordServer(s.ctx, s.consoleNetwork.Name, newNodeID, "ADMIN", "ADMIN")
+	s.Require().NoError(err)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := sshContainer.Terminate(ctx); err != nil {
+			s.T().Logf("Warning: failed to terminate SSH container %s: %v", newNodeID, err)
+		}
+	}()
+
+	err = loadRedfishEndpoints(s.ctx, s.rfNetwork.Name, []redfishEndpoint{{
+		Host:     newNodeID,
+		Username: "ADMIN",
+		Password: "ADMIN",
+	}})
+	s.Require().NoError(err, "failed to register new Redfish endpoint")
+
+	// Clean up the Redfish endpoint at the end to avoid interfering with other tests
+	defer func() {
+		s.T().Logf("Removing Redfish endpoint %s", newNodeID)
+		if err := deleteRedfishEndpoint(s.ctx, s.rfNetwork.Name, newNodeID); err != nil {
+			s.T().Logf("Warning: failed to remove Redfish endpoint %s: %v", newNodeID, err)
+		}
+	}()
+
+	// Verify reconnect messages appear
+	s.T().Log("Waiting for reconnection messages")
+	reconnectingMsg := fmt.Sprintf("[Reconnecting to %s", existingNodeID)
+	output, err := s.readWebSocketUntil(wsConn, reconnectingMsg, 2*time.Minute)
+	s.Require().NoError(err, "Expected reconnecting message")
+	s.Require().Contains(output, reconnectingMsg, "Expected reconnecting message in output")
+	s.T().Logf("Saw reconnecting message: %s", output)
+
+	// Wait for ConMan connection banner to confirm successful reconnection
+	conmanConnectedMsg := fmt.Sprintf("<ConMan> Connection to console [%s] opened", existingNodeID)
+	output, err = s.readWebSocketUntil(wsConn, conmanConnectedMsg, 2*time.Minute)
+	s.Require().NoError(err, "Expected ConMan connection banner")
+	s.Require().Contains(output, conmanConnectedMsg, "Expected ConMan connection banner in output")
+	s.T().Logf("Saw ConMan connection banner: %s", output)
+
+	// Wait for console prompt to appear after reconnection
+	s.T().Log("Waiting for console prompt after reconnection")
+	_, err = s.waitForConsolePrompt(wsConn, ":~$ ", promptTimeout)
+	s.Require().NoError(err, "Expected console prompt after reconnection")
+	s.T().Log("Console prompt received after reconnection")
+
+	// Rerun hostname command to verify reconnection worked
+	s.T().Log("Running hostname command after reconnection")
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
+	s.Require().NoError(err, "Error sending hostname command after reconnect")
+
+	hostnameOutput2, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output after reconnection")
+	s.Require().Contains(hostnameOutput2, expectedHostLine, "Expected hostname in output after reconnection")
+	s.T().Logf("Hostname output after reconnection: %s", hostnameOutput2)
+
+	s.T().Log("Reconnection test completed successfully")
+}
+
+func (s *IntegrationTestSuite) TestConsoleInteractiveInvalidNode() {
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err, "Failed to parse API URL")
+
+	// Try to connect to a non-existent node
+	invalidNodeID := "x9c9s9b9"
+	wsURL := url.URL{
+		Scheme: "ws",
+		Host:   parsedURL.Host,
+		Path:   fmt.Sprintf("/remote-console/consoles/%s", invalidNodeID),
+	}
+
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+
+	_, resp, err := dialer.DialContext(context.Background(), wsURL.String(), nil)
+	
+	// Should get an error because the WebSocket upgrade should fail with 404
+	s.Require().Error(err, "Expected error when connecting to invalid node")
+	
+	if resp != nil {
+		defer resp.Body.Close()
+		s.Require().Equal(http.StatusNotFound, resp.StatusCode, 
+			"Expected 404 Not Found for invalid node")
+		s.T().Logf("Got expected 404 status for invalid node %s", invalidNodeID)
+	}
+}
+
+func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err, "Failed to parse API URL")
+
+	// Try to tail a non-existent node
+	invalidNodeID := "x9c9s9b9"
+	wsURL := url.URL{
+		Scheme: "ws",
+		Host:   parsedURL.Host,
+		Path:   fmt.Sprintf("/remote-console/consoles/%s/tail", invalidNodeID),
+	}
+
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+
+	_, resp, err := dialer.DialContext(context.Background(), wsURL.String(), nil)
+	
+	// Should get an error because the WebSocket upgrade should fail with 404
+	s.Require().Error(err, "Expected error when tailing invalid node")
+	
+	if resp != nil {
+		defer resp.Body.Close()
+		s.Require().Equal(http.StatusNotFound, resp.StatusCode, 
+			"Expected 404 Not Found for invalid node")
+		s.T().Logf("Got expected 404 status for invalid node %s", invalidNodeID)
 	}
 }
