@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
-	"strings"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
@@ -22,7 +22,7 @@ import (
 type interactiveConsoleSession struct {
 	cmd         *exec.Cmd
 	ptmx        *os.File
-	ptmxMu      sync.RWMutex // Protects ptmx during reconnection
+	ptmxMutex   sync.RWMutex // Protects ptmx during reconnection
 	nodeID      string
 	doneOnce    sync.Once
 	processExit chan struct{}
@@ -35,9 +35,9 @@ func (s *interactiveConsoleSession) close() {
 		log.Printf("Starting close for console session: %s", s.nodeID)
 
 		// Try graceful disconnect via ConMan escape sequence
-		s.ptmxMu.RLock()
+		s.ptmxMutex.RLock()
 		ptmx := s.ptmx
-		s.ptmxMu.RUnlock()
+		s.ptmxMutex.RUnlock()
 		
 		if ptmx != nil {
 			log.Printf("Sending ConMan escape sequence (&.) to disconnect from console: %s", s.nodeID)
@@ -61,12 +61,12 @@ func (s *interactiveConsoleSession) close() {
 		}
 
 		// Close PTY - this will cause streamOutput to exit
-		s.ptmxMu.Lock()
+		s.ptmxMutex.Lock()
 		if s.ptmx != nil {
 			s.ptmx.Close()
 			s.ptmx = nil
 		}
-		s.ptmxMu.Unlock()
+		s.ptmxMutex.Unlock()
 
 		// Close WebSocket - this will cause streamInput to exit and cleanup WebSocket goroutines
 		if s.ws != nil {
@@ -120,9 +120,9 @@ func (s *interactiveConsoleSession) startConmanProcess() error {
 		return errors.New(msg)
 	default:
 		// Process is still running - now safe to expose PTY to other goroutines
-		s.ptmxMu.Lock()
+		s.ptmxMutex.Lock()
 		s.ptmx = ptmx
-		s.ptmxMu.Unlock()
+		s.ptmxMutex.Unlock()
 		return nil
 	}
 }
@@ -138,11 +138,11 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) {
 	}
 
 	// Close old PTY if it exists
-	s.ptmxMu.Lock()
+	s.ptmxMutex.Lock()
 	if s.ptmx != nil {
 		s.ptmx.Close()
 	}
-	s.ptmxMu.Unlock()
+	s.ptmxMutex.Unlock()
 
 	// Try to start conman with retries over 30 seconds
 	timeout := time.After(30 * time.Second)
@@ -157,16 +157,20 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) {
 			// Success!
 			log.Printf("Successfully reconnected conman for console: %s", s.nodeID)
 			msg := fmt.Sprintf("\n[Reconnected to %s]\n", s.nodeID)
-			s.writeMessage(ctx, websocket.TextMessage, []byte(msg))
-
-			// Restart monitoring
-			go s.monitorProcess(ctx)
+			if err := s.writeMessage(ctx, websocket.TextMessage, []byte(msg)); err != nil {
+				log.Printf("Failed to send reconnected message: %v", err)
+				s.close()
+				return
+			}
 
 			// Restart output streaming
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go s.streamOutput(ctx, &wg)
 			// Note: streamInput is already running and will continue to work with the new PTY
+			
+			// Restart monitoring - this will handle if conman exits again
+			go s.monitorProcess(ctx)
 			return
 		} else {
 			log.Printf("Failed to start conman (attempt %d): %v", attempt, err)
@@ -209,9 +213,9 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context, wg *sync.W
 
 	buf := make([]byte, 4096)
 	for {
-		s.ptmxMu.RLock()
+		s.ptmxMutex.RLock()
 		ptmx := s.ptmx
-		s.ptmxMu.RUnlock()
+		s.ptmxMutex.RUnlock()
 		
 		if ptmx == nil {
 			log.Printf("PTY is nil, exiting streamOutput for console: %s", s.nodeID)
@@ -265,15 +269,15 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
 			// Write user input to PTY
 			// Hold RLock during the entire write to prevent reconnect() from swapping PTY
-			s.ptmxMu.RLock()
+			s.ptmxMutex.RLock()
 			if s.ptmx == nil {
-				s.ptmxMu.RUnlock()
+				s.ptmxMutex.RUnlock()
 				log.Printf("PTY is nil, skipping input for console: %s", s.nodeID)
 				continue
 			}
 			
 			_, err := s.ptmx.Write(message)
-			s.ptmxMu.RUnlock()
+			s.ptmxMutex.RUnlock()
 			
 			if err != nil {
 				log.Printf("Failed to write to PTY: %v", err)

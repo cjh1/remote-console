@@ -65,6 +65,8 @@ func (ws *webSocketSession) write(ctx context.Context, messageType int, data []b
 
 func (ws *webSocketSession) close() {
 	ws.closeOnce.Do(func() {
+		log.Printf("Closing WebSocket session: %s", ws.name)
+		// Close send channel - this will cause writePump to exit
 		close(ws.send)
 	})
 }
