@@ -27,7 +27,7 @@ type interactiveConsoleSession struct {
 	
 	// Context for coordinating shutdown across all goroutines
 	ctx         context.Context
-	cancelFunc  context.CancelFunc
+	cancel      context.CancelFunc
 
 	ws            *webSocketSession
 	rateLimiter   *ratelimiter.LeakyBucket // Rate limit console output
@@ -35,13 +35,13 @@ type interactiveConsoleSession struct {
 	processExited chan struct{}            // Closed when current conman process exits
 }
 
-// close performs graceful shutdown of the console session
+// Close performs graceful shutdown of the console session
 // This method is idempotent and safe to call multiple times
-func (s *interactiveConsoleSession) close() {
+func (s *interactiveConsoleSession) Close() {
 	log.Printf("Starting close for console session: %s", s.nodeID)
 
 	// Cancel context to signal all goroutines to stop (idempotent)
-	s.cancelFunc()
+	s.cancel()
 
 	// Try graceful disconnect via ConMan escape sequence
 	s.ptmxMutex.RLock()
@@ -95,7 +95,7 @@ func (s *interactiveConsoleSession) monitorProcess() {
 		// Check if the node still exists (might have been updated/changed)
 		if !validateNode(s.nodeID) {
 			log.Printf("Node %s no longer exists, closing session", s.nodeID)
-			s.close()
+			s.Close()
 			return
 		}
 		
@@ -168,7 +168,7 @@ func (s *interactiveConsoleSession) reconnect() bool {
 	select {
 	case <-s.ctx.Done():
 		log.Printf("Context cancelled before reconnection for %s: %v", s.nodeID, s.ctx.Err())
-		s.close()
+		s.Close()
 		return false
 	default:
 	}
@@ -178,7 +178,7 @@ func (s *interactiveConsoleSession) reconnect() bool {
 	err := s.ws.Write(websocket.TextMessage, []byte(reconnectMsg))
 	if err != nil {
 		log.Printf("Failed to send reconnect message: %v", err)
-		s.close()
+		s.Close()
 		return false
 	}
 
@@ -206,7 +206,7 @@ func (s *interactiveConsoleSession) reconnect() bool {
 			select {
 			case <-s.ctx.Done():
 				log.Printf("Context cancelled after reconnection for %s: %v", s.nodeID, s.ctx.Err())
-				s.close()
+				s.Close()
 				return false
 			default:
 			}
@@ -234,11 +234,11 @@ func (s *interactiveConsoleSession) reconnect() bool {
 				log.Printf("Failed to send reconnection failure message: %v", err)
 			}
 			
-			s.close()
+			s.Close()
 			return false
 		case <-s.ctx.Done():
 			log.Printf("Session closed during reconnection for %s: %v", s.nodeID, s.ctx.Err())
-			s.close()
+			s.Close()
 			return false
 		// Wait before next retry
 		case <-time.After(retryDelay):
@@ -326,7 +326,7 @@ func (s *interactiveConsoleSession) streamInput() {
 			} else {
 				log.Printf("WebSocket closed normally for console: %s", s.nodeID)
 			}
-			s.close()
+			s.Close()
 			return
 		}
 
@@ -351,7 +351,7 @@ func (s *interactiveConsoleSession) streamInput() {
 			
 			if err != nil {
 				log.Printf("Failed to write to PTY: %v", err)
-				s.close()
+				s.Close()
 				return
 			}
 		}
@@ -373,18 +373,18 @@ func (s *interactiveConsoleSession) Start() {
 }
 
 
-func newInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
+func NewInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
 	ctx, cancel := context.WithCancel(context.Background())
 	
 	session := &interactiveConsoleSession{
 		nodeID:      nodeID,
 		rateLimiter: ratelimiter.NewLeakyBucket(rateLimitBurstKB, rateLimitInterval),
 		ctx:         ctx,
-		cancelFunc:  cancel,
+		cancel:  cancel,
 
 	}
 
-	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.close)
+	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.Close)
 	session.ws.Start()
 
 	// Start conman process with PTY
@@ -394,7 +394,7 @@ func newInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interact
 		if err != nil {
 			log.Printf("Failed to send error message via WebSocket: %v", err)
 		}
-		session.close()
+		session.Close()
 		return nil
 	}
 
@@ -433,7 +433,7 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// From here on, errors must be sent via WebSocket close frames
-	session := newInteractiveConsoleSession(nodeID, conn)
+	session := NewInteractiveConsoleSession(nodeID, conn)
 	if session == nil {
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console session"))
@@ -441,7 +441,7 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer session.close() // Ensure cleanup always happens
+	defer session.Close() // Ensure cleanup always happens
 
 	log.Printf("Started conman process for console: %s", nodeID)
 
