@@ -12,11 +12,11 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	//"time"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail"
-	//"github.com/nxadm/tail/ratelimiter"
+	"github.com/nxadm/tail/ratelimiter"
 )
 
 type consoleTailSession struct {
@@ -25,12 +25,14 @@ type consoleTailSession struct {
 	consoleLogsPath string
 	closeOnce       sync.Once
 	ws              *webSocketSession
+	rateLimiter     *ratelimiter.LeakyBucket // Rate limit console output
 }
 
 func newConsoleTailSession(ctx context.Context, consoleLogsPath string, nodeID string, conn *websocket.Conn) *consoleTailSession {
 	cts := &consoleTailSession{
 		nodeID:          nodeID,
 		consoleLogsPath: consoleLogsPath,
+		rateLimiter:     ratelimiter.NewLeakyBucket(rateLimitBurstKB, rateLimitInterval),
 	}
 
 	cts.ws = NewWebSocketSession(conn, fmt.Sprintf("tail session %s", nodeID), cts.close)
@@ -110,6 +112,14 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 		lineText := line.Text + "\n"
 		log.Printf("before write")
 		log.Printf("Sending line:  follow: %v, %s", follow, lineText)
+		
+		// Apply rate limiting (convert bytes to KB for rate limiter units)
+		kb := uint16((len(lineText) + 1023) / 1024) // Round up to nearest KB
+		for !cts.rateLimiter.Pour(kb) {
+			log.Printf("Rate limit reached for tail %s, waiting for capacity", cts.nodeID)
+			time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
+		}
+		
 		err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
 		log.Printf("after write")
 		if err != nil {
@@ -189,7 +199,17 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		if err == nil {
 			for _, line := range lines {
 				fmt.Printf("Sending line: follow: %v: %s\n", follow, line)
-				if err := cts.ws.Write(websocket.TextMessage, []byte(line+"\n")); err != nil {
+				lineText := line + "\n"
+				
+				// Apply rate limiting (convert bytes to KB for rate limiter units)
+				kb := uint16((len(lineText) + 1023) / 1024) // Round up to nearest KB
+				for !cts.rateLimiter.Pour(kb) {
+					log.Printf("Rate limit reached for tail %s (history), waiting for capacity", cts.nodeID)
+					time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
+				}
+				
+				err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
+				if err != nil {
 					log.Printf("Failed to send lines: %v", err)
 					cts.ws.Write(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error sending console log"))
@@ -231,11 +251,10 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
 	// Configuration for tail function
 	conf := tail.Config{
-		Follow:      follow,
-		MustExist:   false, // If file doesn't exist keep trying
-		Poll:        true,  // Poll instead of using inotify -- inotify may not work on all filesystems
-		Logger:      tail.DiscardingLogger,
-		//RateLimiter: ratelimiter.NewLeakyBucket(1000, 1*time.Millisecond), // Rate limit to 1000 lines per second using leaky bucket
+		Follow:    follow,
+		MustExist: false, // If file doesn't exist keep trying
+		Poll:      true,  // Poll instead of using inotify -- inotify may not work on all filesystems
+		Logger:    tail.DiscardingLogger,
 	}
 
 	// Only set ReOpen to true if we are following the file

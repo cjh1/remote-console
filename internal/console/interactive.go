@@ -261,11 +261,11 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context, wg *sync.W
 			log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
 			
 			// Apply rate limiting (convert bytes to KB for rate limiter units)
-			// kb := uint16((n + 1023) / 1024) // Round up to nearest KB
-			// for !s.rateLimiter.Pour(kb) {
-			// 	log.Printf("Rate limit reached for console %s, waiting for capacity", s.nodeID)
-			// 	time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
-			// }
+			kb := uint16((n + 1023) / 1024) // Round up to nearest KB
+			for !s.rateLimiter.Pour(kb) {
+				log.Printf("Rate limit reached for console %s, waiting for capacity", s.nodeID)
+				time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
+			}
 			
 			err := s.ws.Write(websocket.BinaryMessage, buf[:n])
 			if err != nil {
@@ -321,7 +321,7 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
 	session := &interactiveConsoleSession{
 		nodeID:      nodeID,
-		rateLimiter: ratelimiter.NewLeakyBucket(10240, 1*time.Millisecond), // Rate limit in KB units: 10MB burst, 1MB/sec sustained
+		rateLimiter: ratelimiter.NewLeakyBucket(rateLimitBurstKB, rateLimitInterval),
 	}
 
 	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.close)

@@ -5,10 +5,18 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 
 	"github.com/go-chi/chi/v5"
+)
+
+// Rate limiter constants for console output
+const (
+	// Rate limit in KB units: 10MB burst, 1MB/sec sustained
+	rateLimitBurstKB    = 10240 // 10MB burst capacity
+	rateLimitInterval = 1*time.Millisecond     // Drain 1KB per millisecond = 1MB/sec
 )
 
 func drainAndCloseRequestBody(req *http.Request) {
