@@ -29,9 +29,10 @@ type interactiveConsoleSession struct {
 	ctx         context.Context
 	cancelFunc  context.CancelFunc
 
-	ws          *webSocketSession
-	rateLimiter *ratelimiter.LeakyBucket // Rate limit console output
-	wg          sync.WaitGroup           // Tracks all I/O goroutines including reconnected ones
+	ws            *webSocketSession
+	rateLimiter   *ratelimiter.LeakyBucket // Rate limit console output
+	wg            sync.WaitGroup           // Tracks all I/O goroutines including reconnected ones
+	processExited chan struct{}            // Closed when current conman process exits
 }
 
 // close performs graceful shutdown of the console session
@@ -80,7 +81,7 @@ func (s *interactiveConsoleSession) close() {
 // This runs in a loop, monitoring each new process after successful reconnection
 func (s *interactiveConsoleSession) monitorProcess() {
 	for {
-		s.cmd.Wait()
+		<-s.processExited
 		log.Printf("Conman process exited for console: %s", s.nodeID)
 		
 		// Check if session is closing
@@ -126,6 +127,13 @@ func (s *interactiveConsoleSession) startConmanProcess() error {
 	s.ptmxMutex.Lock()
 	s.ptmx = ptmx
 	s.ptmxMutex.Unlock()
+
+	// Immediately start waiting on the process to avoid zombies
+	s.processExited = make(chan struct{})
+	go func() {
+		s.cmd.Wait()
+		close(s.processExited)
+	}()
 
 	return nil
 
