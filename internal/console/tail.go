@@ -22,8 +22,6 @@ import (
 type consoleTailSession struct {
 	nodeID          string
 	tail            *tail.Tail
-	ctx             context.Context
-	cancel          context.CancelFunc
 	consoleLogsPath string
 	closeOnce       sync.Once
 	ws              *webSocketSession
@@ -67,9 +65,6 @@ func (cts *consoleTailSession) close() {
 
 		log.Printf("Closing console tail session for: %s", cts.nodeID)
 
-		cts.cancel()
-		log.Printf("Cancelled context for console tail session: %s", cts.nodeID)
-
 		cts.ws.Close()
 	
 		log.Printf("Close completed for console tail session: %s", cts.nodeID)
@@ -97,43 +92,33 @@ func (cts *consoleTailSession) waitForClientClose() {
 func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 	fmt.Printf("streamConsoleTail called for node: %s, follow=%v\n", cts.nodeID, follow)
 	// Read the lines of the tail output while looking for a cancel signal
-	for {
-		select {
-		case <-cts.ctx.Done():
-			// done tailing this file - exit
-			log.Printf("Tailing console for '%s' exiting", cts.nodeID)
+	for line := range cts.tail.Lines {
+		log.Printf("got line: %v", line)
+
+		// Stream the line to the websocket
+		if line == nil {
+			log.Printf("Tailing console for '%s' complete (follow=%v)", cts.nodeID, follow)
+
+			cts.tail.Config.Poll = false
+			cts.tail.Cleanup()
+			cts.tail.Stop()
+			log.Printf("Tail loop exiting for '%s' (follow=%v)", cts.nodeID, follow)
+			return
+		}
+
+		// Add newline back (tail library strips it)
+		lineText := line.Text + "\n"
+		log.Printf("before write")
+		log.Printf("Sending line:  follow: %v, %s", follow, lineText)
+		err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
+		log.Printf("after write")
+		if err != nil {
+			log.Printf("Failed to write message to websocket: %s", err)
+			cts.close()
 			cts.tail.Config.Poll = false
 			cts.tail.Cleanup()
 			cts.tail.Stop()
 			return
-		case line := <-cts.tail.Lines:
-			log.Printf("got line: %v", line)
-
-			// Stream the line to the websocket
-			if line == nil {
-				log.Printf("Tailing console for '%s' complete (follow=%v)", cts.nodeID, follow)
-
-				cts.tail.Config.Poll = false
-				cts.tail.Cleanup()
-				cts.tail.Stop()
-				log.Printf("Tail loop exiting for '%s' (follow=%v)", cts.nodeID, follow)
-				return
-			}
-
-			// Add newline back (tail library strips it)
-			lineText := line.Text + "\n"
-			log.Printf("before write")
-			log.Printf("Sending line:  follow: %v, %s", follow, lineText)
-			err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
-			log.Printf("after write")
-			if err != nil {
-				log.Printf("Failed to write message to websocket: %s", err)
-				cts.close()
-				cts.tail.Config.Poll = false
-				cts.tail.Cleanup()
-				cts.tail.Stop()
-				return
-			}
 		}
 	}
 }
