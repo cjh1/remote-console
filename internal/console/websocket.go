@@ -25,7 +25,7 @@ type webSocketSession struct {
 	send      chan webSockMessage // outbound messages to be sent to the client
 	closeOnce sync.Once // ensures close operations are only done once
 	name      string
-	done 	chan struct{} // closed when the session is closed
+	closed 	chan struct{} // closed when the session is closed
 	onClose   func() 	  // called when the session is closed, used to inform owners of the session that it is closed
 }
 
@@ -33,7 +33,7 @@ func NewWebSocketSession(conn *websocket.Conn, name string, onClose func()) *web
 	return &webSocketSession{
 		conn:    conn,
 		send:    make(chan webSockMessage, 64),
-		done: make(chan struct{}),
+		closed: make(chan struct{}),
 		name:    name,
 		onClose: onClose,
 	}
@@ -61,7 +61,7 @@ func (ws *webSocketSession) Write(messageType int, data []byte) error {
 	select {
     case ws.send <- webSockMessage{messageType: messageType, data: payload}:
         return nil
-    case <-ws.done:
+    case <-ws.closed:
         return errors.New("websocket session closed")
     }
 }
@@ -69,7 +69,7 @@ func (ws *webSocketSession) Write(messageType int, data []byte) error {
 
 func (ws *webSocketSession) closeChannels() {
 	ws.closeOnce.Do(func() {
-		close(ws.done)
+		close(ws.closed)
 		close(ws.send)
 	})
 }
@@ -77,7 +77,7 @@ func (ws *webSocketSession) closeChannels() {
 func (ws *webSocketSession) Close() {
 	ws.closeOnce.Do(func() {
 		// Close done channel first to stop new writes
-		close(ws.done)
+		close(ws.closed)
 
 		// Allow outstanding messages to flush before we close the socket.
 		for { 

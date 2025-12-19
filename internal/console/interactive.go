@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,65 +24,73 @@ type interactiveConsoleSession struct {
 	ptmx        *os.File
 	ptmxMutex   sync.RWMutex // Protects ptmx during reconnection
 	nodeID      string
-	doneOnce    sync.Once
-	processExit chan struct{}
+	
+	// Context for coordinating shutdown across all goroutines
+	ctx         context.Context
+	cancelFunc  context.CancelFunc
+
 	ws          *webSocketSession
 	rateLimiter *ratelimiter.LeakyBucket // Rate limit console output
+	wg          sync.WaitGroup           // Tracks all I/O goroutines including reconnected ones
 }
 
 // close performs graceful shutdown of the console session
+// This method is idempotent and safe to call multiple times
 func (s *interactiveConsoleSession) close() {
-	s.doneOnce.Do(func() {
-		log.Printf("Starting close for console session: %s", s.nodeID)
+	log.Printf("Starting close for console session: %s", s.nodeID)
 
-		// Try graceful disconnect via ConMan escape sequence
-		s.ptmxMutex.RLock()
-		ptmx := s.ptmx
-		s.ptmxMutex.RUnlock()
-		
-		if ptmx != nil {
-			log.Printf("Sending ConMan escape sequence (&.) to disconnect from console: %s", s.nodeID)
-			ptmx.Write([]byte("&."))
-			time.Sleep(100 * time.Millisecond) // Brief pause to let it process
-		}
+	// Cancel context to signal all goroutines to stop (idempotent)
+	s.cancelFunc()
 
-		// Signal process termination (let monitorProcess reap it)
-		if s.cmd != nil && s.cmd.Process != nil {
-			log.Printf("Sending SIGTERM to conman process for console: %s", s.nodeID)
-			s.cmd.Process.Signal(syscall.SIGTERM)
-		}
+	// Try graceful disconnect via ConMan escape sequence
+	s.ptmxMutex.RLock()
+	ptmx := s.ptmx
+	s.ptmxMutex.RUnlock()
+	
+	if ptmx != nil {
+		log.Printf("Sending ConMan escape sequence (&.) to disconnect from console: %s", s.nodeID)
+		// Ignore write errors - PTY might already be closed
+		ptmx.Write([]byte("&."))
+		time.Sleep(100 * time.Millisecond) // Brief pause to let it process
+	}
 
-		// Close PTY - this will cause streamOutput to exit
-		s.ptmxMutex.Lock()
-		if s.ptmx != nil {
-			s.ptmx.Close()
-			s.ptmx = nil
-		}
-		s.ptmxMutex.Unlock()
+	// Signal process termination (idempotent - safe to signal multiple times)
+	if s.cmd != nil && s.cmd.Process != nil {
+		log.Printf("Sending SIGTERM to conman process for console: %s", s.nodeID)
+		// Ignore signal errors - process might already be dead
+		s.cmd.Process.Signal(syscall.SIGTERM)
+	}
 
-		// Close WebSocket - this will cause streamInput to exit and cleanup WebSocket goroutines
-		s.ws.Close()
+	// Close PTY - this will cause streamOutput to exit
+	s.ptmxMutex.Lock()
+	if s.ptmx != nil {
+		// Close returns error if already closed, but that's fine
+		s.ptmx.Close()
+		s.ptmx = nil
+	}
+	s.ptmxMutex.Unlock()
 
-		log.Printf("Close completed for console session: %s", s.nodeID)
-	})
+	// Close WebSocket - already handles multiple closes internally
+	s.ws.Close()
+
+	log.Printf("Close completed for console session: %s", s.nodeID)
 }
 
 // monitorProcess watches for process exit and attempts reconnection if node still exists
 // This runs in a loop, monitoring each new process after successful reconnection
-func (s *interactiveConsoleSession) monitorProcess(ctx context.Context) {
+func (s *interactiveConsoleSession) monitorProcess() {
 	for {
 		s.cmd.Wait()
 		log.Printf("Conman process exited for console: %s", s.nodeID)
-		close(s.processExit)
 		
-		// Check if context is cancelled (session is closing)
+		// Check if session is closing
 		select {
-		case <-ctx.Done():
-			log.Printf("Context cancelled, not reconnecting: %s", s.nodeID)
+		case <-s.ctx.Done():
+			log.Printf("Session closing, stopping monitor for console: %s", s.nodeID)
 			return
 		default:
 		}
-		
+			
 		// Check if the node still exists (might have been updated/changed)
 		if !validateNode(s.nodeID) {
 			log.Printf("Node %s no longer exists, closing session", s.nodeID)
@@ -92,7 +99,7 @@ func (s *interactiveConsoleSession) monitorProcess(ctx context.Context) {
 		}
 		
 		log.Printf("Node %s still exists, attempting to reconnect...", s.nodeID)
-		if !s.reconnect(ctx) {
+		if !s.reconnect() {
 			// Reconnection failed or was cancelled
 			return
 		}
@@ -102,45 +109,57 @@ func (s *interactiveConsoleSession) monitorProcess(ctx context.Context) {
 
 // startConmanProcess starts a new conman process with PTY
 func (s *interactiveConsoleSession) startConmanProcess() error {
+	// Check if session is closing
+	select {
+	case <-s.ctx.Done():
+		return fmt.Errorf("session closing, cannot start conman process: %w", s.ctx.Err())
+	default:
+	}
+	
 	s.cmd = exec.Command("conman", s.nodeID)
-	s.processExit = make(chan struct{})
 
 	ptmx, err := pty.Start(s.cmd)
 	if err != nil {
 		return fmt.Errorf("failed to start conman with PTY: %w", err)
 	}
 
-	// Wait briefly to see if process exits immediately (connection failure)
-	time.Sleep(500 * time.Millisecond)
+	s.ptmxMutex.Lock()
+	s.ptmx = ptmx
+	s.ptmxMutex.Unlock()
+
+	return nil
+
+	// // Wait briefly to see if process exits immediately (connection failure)
+	// time.Sleep(500 * time.Millisecond)
 	
-	select {
-	case <-s.processExit:
-		msg := "conman process exited immediately"
-		// Process exited - read any output to include in error
-		buf := make([]byte, 4096)
-		n, _ := ptmx.Read(buf)
-		if n > 0 {
-			output := strings.TrimSpace(string(buf[:n]))
-			msg = fmt.Sprintf("%s: %s", msg, output)
-		}
-		ptmx.Close()
-		return errors.New(msg)
-	default:
-		// Process is still running - now safe to expose PTY to other goroutines
-		s.ptmxMutex.Lock()
-		s.ptmx = ptmx
-		s.ptmxMutex.Unlock()
-		return nil
-	}
+	// select {
+	// case <-s.processExit:
+	// 	msg := "conman process exited immediately"
+	// 	// Process exited - read any output to include in error
+	// 	buf := make([]byte, 4096)
+	// 	n, _ := ptmx.Read(buf)
+	// 	if n > 0 {
+	// 		output := strings.TrimSpace(string(buf[:n]))
+	// 		msg = fmt.Sprintf("%s: %s", msg, output)
+	// 	}
+	// 	ptmx.Close()
+	// 	return errors.New(msg)
+	// default:
+	// 	// Process is still running - now safe to expose PTY to other goroutines
+	// 	s.ptmxMutex.Lock()
+	// 	s.ptmx = ptmx
+	// 	s.ptmxMutex.Unlock()
+	// 	return nil
+	// }
 }
 
 // reconnect attempts to restart the conman process and reconnect streams
 // Returns true if reconnection succeeded, false if it failed or was cancelled
-func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
+func (s *interactiveConsoleSession) reconnect() bool {
 	// Check if context is already cancelled
 	select {
-	case <-ctx.Done():
-		log.Printf("Context cancelled before reconnection for %s", s.nodeID)
+	case <-s.ctx.Done():
+		log.Printf("Context cancelled before reconnection for %s: %v", s.nodeID, s.ctx.Err())
 		s.close()
 		return false
 	default:
@@ -175,10 +194,10 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
 			// Success!
 			log.Printf("Successfully reconnected conman for console: %s", s.nodeID)
 			
-			// Check context and WebSocket status before starting new goroutines
+			// Check if we are closed (double-check right before starting goroutine)
 			select {
-			case <-ctx.Done():
-				log.Printf("Context cancelled after reconnecting conman for %s", s.nodeID)
+			case <-s.ctx.Done():
+				log.Printf("Context cancelled after reconnection for %s: %v", s.nodeID, s.ctx.Err())
 				s.close()
 				return false
 			default:
@@ -186,9 +205,9 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
 
 			// Restart output streaming
 			// The console output itself will indicate when we're truly connected
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go s.streamOutput(ctx, &wg)
+			// Track this new goroutine in the main WaitGroup
+			s.wg.Add(1)
+			go s.streamOutput()
 			// Note: streamInput is already running and will continue to work with the new PTY
 			
 			// Return true - monitorProcess will continue monitoring this new process
@@ -209,8 +228,8 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
 			
 			s.close()
 			return false
-		case <-ctx.Done():
-			log.Printf("Context cancelled during reconnection for %s", s.nodeID)
+		case <-s.ctx.Done():
+			log.Printf("Session closed during reconnection for %s: %v", s.nodeID, s.ctx.Err())
 			s.close()
 			return false
 		// Wait before next retry
@@ -233,8 +252,16 @@ func isEIO(err error) bool {
 }
 
 // streamOutput reads from PTY and writes to WebSocket
-func (s *interactiveConsoleSession) streamOutput(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (s *interactiveConsoleSession) streamOutput() {
+	defer s.wg.Done()
+
+	// Check if session is closing before starting
+	select {
+	case <-s.ctx.Done():
+		log.Printf("Session closing, streamOutput exiting for console: %s: %v", s.nodeID, s.ctx.Err())
+		return
+	default:
+	}
 
 	buf := make([]byte, 4096)
 	for {
@@ -277,8 +304,8 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context, wg *sync.W
 }
 
 // streamInput reads from WebSocket and writes to PTY
-func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
-	defer wg.Done()
+func (s *interactiveConsoleSession) streamInput() {
+	defer s.wg.Done()
 
 	s.ws.configureReadDeadlines()
 
@@ -302,6 +329,12 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 			if s.ptmx == nil {
 				s.ptmxMutex.RUnlock()
 				log.Printf("PTY is nil, skipping input for console: %s", s.nodeID)
+				// Check if closing to exit faster
+				select {
+				case <-s.ctx.Done():
+					return
+				default:
+				}
 				continue
 			}
 			
@@ -317,11 +350,30 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	}
 }
 
+// start begins the console session by launching all goroutines and waiting for completion
+func (s *interactiveConsoleSession) Start() {
+	// Monitor process exit for reconnection attempts
+	go s.monitorProcess()
 
-func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
+	// Start I/O goroutines
+	s.wg.Add(2)
+	go s.streamInput()
+	go s.streamOutput()
+
+	// Wait for I/O goroutines to complete
+	s.wg.Wait()
+}
+
+
+func newInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
+	ctx, cancel := context.WithCancel(context.Background())
+	
 	session := &interactiveConsoleSession{
 		nodeID:      nodeID,
 		rateLimiter: ratelimiter.NewLeakyBucket(rateLimitBurstKB, rateLimitInterval),
+		ctx:         ctx,
+		cancelFunc:  cancel,
+
 	}
 
 	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.close)
@@ -342,8 +394,6 @@ func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *webs
 }
 
 func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
@@ -375,7 +425,7 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// From here on, errors must be sent via WebSocket close frames
-	session := newInteractiveConsoleSession(ctx, nodeID, conn)
+	session := newInteractiveConsoleSession(nodeID, conn)
 	if session == nil {
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console session"))
@@ -387,17 +437,8 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Started conman process for console: %s", nodeID)
 
-	// Monitor process exit for reconnection attempts
-	go session.monitorProcess(ctx)
-
-	// Start I/O goroutines
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go session.streamInput(&wg)
-	go session.streamOutput(ctx, &wg)
-
-	// Wait for I/O goroutines to complete
-	wg.Wait()
+	// Start session (blocks until all goroutines complete)
+	session.Start()
 
 	log.Printf("Interactive console session ended for: %s", nodeID)
 }
