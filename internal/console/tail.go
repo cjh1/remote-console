@@ -30,16 +30,13 @@ type consoleTailSession struct {
 }
 
 func newConsoleTailSession(ctx context.Context, consoleLogsPath string, nodeID string, conn *websocket.Conn) *consoleTailSession {
-	sessionCtx, cancel := context.WithCancel(ctx)
 	cts := &consoleTailSession{
 		nodeID:          nodeID,
-		ctx:             sessionCtx,
-		cancel:          cancel,
 		consoleLogsPath: consoleLogsPath,
 	}
 
-	cts.ws = newWebSocketSession(conn, fmt.Sprintf("tail session %s", nodeID), cts.close)
-	cts.ws.start(sessionCtx)
+	cts.ws = NewWebSocketSession(conn, fmt.Sprintf("tail session %s", nodeID), cts.close)
+	cts.ws.Start()
 
 	return cts
 }
@@ -73,21 +70,17 @@ func (cts *consoleTailSession) close() {
 		cts.cancel()
 		log.Printf("Cancelled context for console tail session: %s", cts.nodeID)
 
-		cts.ws.close()
+		cts.ws.Close()
 	
 		log.Printf("Close completed for console tail session: %s", cts.nodeID)
 	})
-}
-
-func (cts *consoleTailSession) writeMessage(messageType int, data []byte) error {
-	return cts.ws.write(cts.ctx, messageType, data)
 }
 
 func (cts *consoleTailSession) waitForClientClose() {
 	log.Printf("Waiting for client close on tail session '%s'", cts.nodeID)
 	for {
 		cts.ws.configureReadDeadlines()
-		_, _, err := cts.ws.readMessage()
+		_, _, err := cts.ws.Read()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("WebSocket closed normally for tail session '%s'", cts.nodeID)
@@ -131,7 +124,7 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 			lineText := line.Text + "\n"
 			log.Printf("before write")
 			log.Printf("Sending line:  follow: %v, %s", follow, lineText)
-			err := cts.writeMessage(websocket.TextMessage, []byte(lineText))
+			err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
 			log.Printf("after write")
 			if err != nil {
 				log.Printf("Failed to write message to websocket: %s", err)
@@ -211,9 +204,9 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		if err == nil {
 			for _, line := range lines {
 				fmt.Printf("Sending line: follow: %v: %s\n", follow, line)
-				if err := cts.writeMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
+				if err := cts.ws.Write(websocket.TextMessage, []byte(line+"\n")); err != nil {
 					log.Printf("Failed to send lines: %v", err)
-					cts.writeMessage(websocket.CloseMessage,
+					cts.ws.Write(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error sending console log"))
 					cts.close()
 					return
@@ -230,15 +223,22 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		} else if errors.Is(err, os.ErrNotExist) {
 			log.Printf("Console log %s not found; no history available (follow=%v)", filename, follow)
 			if !follow {
-				cts.writeMessage(websocket.CloseMessage,
+				err := cts.ws.Write(websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Console log not available yet"))
+				if err != nil {
+					log.Printf("Failed to send close message: %v", err)
+				}
+				
 				cts.close()
 				return
 			}
 		} else {
 			log.Printf("Failed to read last %d lines from %s: %v", numLines, filename, err)
-			cts.writeMessage(websocket.CloseMessage,
+			err = cts.ws.Write(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error reading console log"))
+			if err != nil {
+				log.Printf("Failed to send close message: %v", err)
+			}
 			cts.close()
 			return
 		}
@@ -272,8 +272,11 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	cts.tail, err = tail.TailFile(filename, conf)
 	if err != nil {
 		log.Printf("Failed to tail file %s with error:%s", filename, err)
-		cts.writeMessage(websocket.CloseMessage,
+		err = cts.ws.Write(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console tail session"))
+		if err != nil {
+			log.Printf("Failed to send close message: %v", err)
+		}
 		cts.close()
 		return
 	}

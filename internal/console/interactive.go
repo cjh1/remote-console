@@ -62,9 +62,7 @@ func (s *interactiveConsoleSession) close() {
 		s.ptmxMutex.Unlock()
 
 		// Close WebSocket - this will cause streamInput to exit and cleanup WebSocket goroutines
-		if s.ws != nil {
-			s.ws.close()
-		}
+		s.ws.Close()
 
 		log.Printf("Close completed for console session: %s", s.nodeID)
 	})
@@ -150,7 +148,8 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
 	
 	// Notify user via WebSocket
 	reconnectMsg := fmt.Sprintf("\n[Reconnecting to %s...]\n", s.nodeID)
-	if err := s.writeMessage(ctx, websocket.TextMessage, []byte(reconnectMsg)); err != nil {
+	err := s.ws.Write(websocket.TextMessage, []byte(reconnectMsg))
+	if err != nil {
 		log.Printf("Failed to send reconnect message: %v", err)
 		s.close()
 		return false
@@ -203,7 +202,11 @@ func (s *interactiveConsoleSession) reconnect(ctx context.Context) bool {
 		case <-timeout:
 			log.Printf("Reconnection timeout after %d attempts for %s", attempt, s.nodeID)
 			errorMsg := fmt.Sprintf("\r\n[Reconnection failed after %d attempts]\r\n", attempt)
-			s.writeMessage(ctx, websocket.TextMessage, []byte(errorMsg))
+			err := s.ws.Write(websocket.TextMessage, []byte(errorMsg))
+			if err != nil {
+				log.Printf("Failed to send reconnection failure message: %v", err)
+			}
+			
 			s.close()
 			return false
 		case <-ctx.Done():
@@ -264,13 +267,9 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context, wg *sync.W
 			// 	time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
 			// }
 			
-			if err := s.writeMessage(ctx, websocket.BinaryMessage, buf[:n]); err != nil {
-				// Don't log if WebSocket is already closed (happens during normal shutdown)
-				if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) &&
-					err.Error() != "websocket: close sent" {
-					log.Printf("Failed to write to WebSocket: %v", err)
-				}
-				// WebSocket write failed, exit gracefully
+			err := s.ws.Write(websocket.BinaryMessage, buf[:n])
+			if err != nil {
+				// WebSocket closed/cancelled, exit gracefully
 				return
 			}
 		}
@@ -284,7 +283,7 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	s.ws.configureReadDeadlines()
 
 	for {
-		messageType, message, err := s.ws.readMessage()
+		messageType, message, err := s.ws.Read()
 		if err != nil {
 			// Check if it's an unexpected close (not normal, going away, or abnormal)
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -318,9 +317,6 @@ func (s *interactiveConsoleSession) streamInput(wg *sync.WaitGroup) {
 	}
 }
 
-func (s *interactiveConsoleSession) writeMessage(ctx context.Context, messageType int, data []byte) error {
-	return s.ws.write(ctx, messageType, data)
-}
 
 func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
 	session := &interactiveConsoleSession{
@@ -328,13 +324,16 @@ func newInteractiveConsoleSession(ctx context.Context, nodeID string, conn *webs
 		rateLimiter: ratelimiter.NewLeakyBucket(10240, 1*time.Millisecond), // Rate limit in KB units: 10MB burst, 1MB/sec sustained
 	}
 
-	session.ws = newWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.close)
-	session.ws.start(ctx)
+	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.close)
+	session.ws.Start()
 
 	// Start conman process with PTY
 	if err := session.startConmanProcess(); err != nil {
 		log.Printf("Failed to start conman with PTY: %v", err)
-		session.writeMessage(ctx, websocket.TextMessage, []byte("Error: Failed to start conman with PTY"))
+		err = session.ws.Write(websocket.TextMessage, []byte("Error: Failed to start conman with PTY"))
+		if err != nil {
+			log.Printf("Failed to send error message via WebSocket: %v", err)
+		}
 		session.close()
 		return nil
 	}
