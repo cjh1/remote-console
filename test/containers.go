@@ -492,6 +492,14 @@ func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers
 			"RCS_CREDS_SECURE_STORAGE_SSH_KEYS_PATH": "hms-creds/bmc-console-keys",
 			"RCS_CONMAN_PID_FILE_PATH":               "/app/remote-console.pid",
 			"RCS_CONMAN_LOGS_PATH":                   "/tmp",
+			// Log rotation settings for testing
+			"RCS_LOG_ROTATE_ENABLED":                 "true",
+			"RCS_LOG_ROTATE_CHECK_FREQUENCY":         "5",  // Check every 5 seconds
+			"RCS_CONSOLE_LOGS_FILE_SIZE":             "2K", // Small size to trigger rotation easily
+			"RCS_CONSOLE_LOGS_NUM_ROTATE":            "2",  // Keep 2 rotated files
+			"RCS_CONSOLE_LOGS_BACKUP_PATH":           "/tmp/conman.old",
+			"RCS_LOG_ROTATE_FILE_PATH":               "/tmp/logrotate.conman",
+			"RCS_LOG_ROTATE_STATE_FILE_PATH":         "/tmp/rot_conman.state",
 		},
 		ExposedPorts: []string{"26776/tcp"},
 		WaitingFor: wait.ForHTTP("/remote-console/readiness").

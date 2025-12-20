@@ -70,6 +70,7 @@ RUN set -eux \
         bash \
         jq \
         inotify-tools \
+        logrotate \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy in the needed files
