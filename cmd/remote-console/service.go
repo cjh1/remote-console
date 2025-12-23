@@ -16,7 +16,6 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
-	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
 // ConmanService defines the interface for conman service operations
@@ -171,8 +170,8 @@ func runService(config remoteConsoleConfig) error {
 	conmanService := conman.NewConmanService(config.Conman)
 
 	// then we set up the goroutine that controls conman
-	err := utils.EnsureDirPresent(config.Conman.LogsPath, 0755)
-	if err != nil {
+	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
+	if err := os.MkdirAll(conmanLogsPath, 0755); err != nil {
 		log.Fatal(err)
 	}
 
@@ -184,8 +183,10 @@ func runService(config remoteConsoleConfig) error {
 	// respinAggLog()
 
 	logsService := logs.NewLogsService(config.Log)
+	// Initialize aggregation log early so it is present in the first logrotate config.
+	logsService.EnsureAggLog()
 
-	if _, err = credsService.EnsureConsoleKeysPresent(); err != nil {
+	if _, err := credsService.EnsureConsoleKeysPresent(); err != nil {
 		log.Printf("Error ensuring console SSH keys present: %v", err)
 	}
 
@@ -211,7 +212,6 @@ func runService(config remoteConsoleConfig) error {
 
 	// Conman will append "conman" to this path for its logs, so we
 	// need to pass that full path to service monitoring the logs
-	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
 	console.SetupRoutes(conmanLogsPath)
 
 	log.Printf("Spinning up http server...")

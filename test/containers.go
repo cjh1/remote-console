@@ -104,6 +104,7 @@ func loadSSHKeysIntoVault(ctx context.Context, network string, sshKeyPath string
 	return err
 }
 
+// TODO I think this can be done by exec into the existing vault container? Would that be better?
 func setConsoleCredentials(ctx context.Context, network, xname, username, password string) error {
 	cmd := fmt.Sprintf("vault kv put hms-creds/%s Username=%s Password='%s' Xname=%s",
 		xname, username, password, xname)
@@ -409,11 +410,11 @@ func startSSHKeyServer(ctx context.Context, network string, alias string, userna
 			network: {alias},
 		},
 		Env: map[string]string{
-			"PUID":       "1000",
-			"PGID":       "1000",
-			"USER_NAME":  username,
-			"PUBLIC_KEY": publicKey,
-			"LISTEN_PORT":     "22",
+			"PUID":        "1000",
+			"PGID":        "1000",
+			"USER_NAME":   username,
+			"PUBLIC_KEY":  publicKey,
+			"LISTEN_PORT": "22",
 		},
 		ExposedPorts: []string{"22/tcp"},
 		WaitingFor:   wait.ForLog("done.").WithStartupTimeout(60 * time.Second),
@@ -454,8 +455,8 @@ func startIPMIServer(ctx context.Context, network string, alias string) (testcon
 	})
 }
 
-// startRemoteConsole starts the remote-console service
-func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers.Container, error) {
+// startRemoteConsoleWithEnv starts the remote-console service with optional env overrides
+func startRemoteConsoleWithEnv(ctx context.Context, envOverrides map[string]string, networks ...string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
 			Context:    "..",
@@ -493,13 +494,12 @@ func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers
 			"RCS_CONMAN_PID_FILE_PATH":               "/app/remote-console.pid",
 			"RCS_CONMAN_LOGS_PATH":                   "/tmp",
 			// Log rotation settings for testing
-			"RCS_LOG_ROTATE_ENABLED":                 "true",
-			"RCS_LOG_ROTATE_CHECK_FREQUENCY":         "5",  // Check every 5 seconds
-			"RCS_CONSOLE_LOGS_FILE_SIZE":             "2K", // Small size to trigger rotation easily
-			"RCS_CONSOLE_LOGS_NUM_ROTATE":            "2",  // Keep 2 rotated files
-			"RCS_CONSOLE_LOGS_BACKUP_PATH":           "/tmp/conman.old",
-			"RCS_LOG_ROTATE_FILE_PATH":               "/tmp/logrotate.conman",
-			"RCS_LOG_ROTATE_STATE_FILE_PATH":         "/tmp/rot_conman.state",
+			"RCS_LOG_ROTATE_CHECK_FREQUENCY": "5", // Check every 5 seconds
+			"RCS_CONSOLE_LOGS_FILE_SIZE":     "5M", // Small size to trigger rotation easily
+			"RCS_CONSOLE_LOGS_NUM_ROTATE":    "2", // Keep 2 rotated files
+			"RCS_CONSOLE_LOGS_BACKUP_PATH":   "/tmp/conman.old",
+			"RCS_LOG_ROTATE_FILE_PATH":       "/tmp/logrotate.conman",
+			"RCS_LOG_ROTATE_STATE_FILE_PATH": "/tmp/rot_conman.state",
 		},
 		ExposedPorts: []string{"26776/tcp"},
 		WaitingFor: wait.ForHTTP("/remote-console/readiness").
@@ -514,10 +514,20 @@ func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers
 		req.NetworkAliases[network] = []string{"remote-console"}
 	}
 
+	// Apply overrides if provided
+	for k, v := range envOverrides {
+		req.Env[k] = v
+	}
+
 	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
 	})
+}
+
+// startRemoteConsole starts the remote-console service with default test env
+func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers.Container, error) {
+	return startRemoteConsoleWithEnv(ctx, nil, networks...)
 }
 
 // getDefaultSSHKeyPath returns the default SSH key path for testing

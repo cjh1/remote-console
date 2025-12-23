@@ -2,6 +2,9 @@ package test
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/network"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/OpenCHAMI/remote-console/internal/console"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
@@ -37,9 +41,48 @@ func uniqueMessage(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
 
+// generateTempSSHKeyPair creates a temporary keypair for testing and returns the private key path and public key string.
+func generateTempSSHKeyPair() (string, string, error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("generate ed25519 key: %w", err)
+	}
+
+	// Marshal private key to OpenSSH format
+	privPEM, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		return "", "", fmt.Errorf("marshal private key: %w", err)
+	}
+
+	privFile, err := os.CreateTemp("", "rcs-test-key-*")
+	if err != nil {
+		return "", "", fmt.Errorf("create temp private key: %w", err)
+	}
+	defer privFile.Close()
+
+	if err := os.Chmod(privFile.Name(), 0600); err != nil {
+		return "", "", fmt.Errorf("chmod private key: %w", err)
+	}
+	
+	// Write properly formatted SSH private key
+	if err := pem.Encode(privFile, privPEM); err != nil {
+		return "", "", fmt.Errorf("write private key: %w", err)
+	}
+
+	// Generate public key in authorized_keys format
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		return "", "", fmt.Errorf("create ssh public key: %w", err)
+	}
+	pubKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+
+	return privFile.Name(), pubKey, nil
+}
+
 // IntegrationTestSuite is the test suite for remote-console integration tests
 type IntegrationTestSuite struct {
 	suite.Suite
+	// TODO we shouldn' store the context here?
 	ctx            context.Context
 	apiURL         string
 	containers     map[string]testcontainers.Container
@@ -83,13 +126,11 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	// Load SSH keys into Vault (if available)
 	s.T().Log("Loading SSH keys into Vault...")
-	sshKeyPath := getDefaultSSHKeyPath()
-	if _, err := os.Stat(sshKeyPath); err == nil {
-		err = loadSSHKeysIntoVault(s.ctx, s.rcsNetwork.Name, sshKeyPath)
-		require.NoError(s.T(), err)
-	} else {
-		s.T().Log("SSH key not found, skipping key loading")
-	}
+	s.T().Log("Generating temporary SSH key pair for tests")
+	sshKeyPath, publicKey, genErr := generateTempSSHKeyPair()
+	require.NoError(s.T(), genErr)
+	err = loadSSHKeysIntoVault(s.ctx, s.rcsNetwork.Name, sshKeyPath)
+	require.NoError(s.T(), err)
 
 	// Start Postgres
 	s.T().Log("Starting Postgres...")
@@ -165,10 +206,6 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	// Start SSH key server
 	s.T().Log("Starting SSH key server...")
-	publicKey := os.Getenv("PUBLIC_KEY")
-	if publicKey == "" {
-		s.T().Log("Warning: PUBLIC_KEY not set, SSH key server may not work properly")
-	}
 	sshKeyServer, err := startSSHKeyServer(s.ctx, s.consoleNetwork.Name, "x0c0s1b0", "ADMIN", publicKey)
 	require.NoError(s.T(), err)
 	s.containers["ssh-key"] = sshKeyServer
@@ -192,11 +229,8 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	}
 
 	// Get remote-console endpoint
-	host, err := remoteConsole.Host(s.ctx)
+	s.apiURL, err = s.getRemoteConsoleAPIURL(remoteConsole)
 	require.NoError(s.T(), err)
-	port, err := remoteConsole.MappedPort(s.ctx, "26776")
-	require.NoError(s.T(), err)
-	s.apiURL = fmt.Sprintf("http://%s:%s", host, port.Port())
 
 	s.T().Logf("Remote console API available at: %s", s.apiURL)
 	s.T().Log("Waiting for remote-console to discover consoles...")
@@ -388,7 +422,7 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 
 func (s *IntegrationTestSuite) readNWebSocketMessages(wsConn *websocket.Conn, count int, timeout time.Duration) (string, error) {
 	wsConn.SetReadDeadline(time.Now().Add(timeout))
-	
+
 	var output strings.Builder
 	for i := range count {
 		_, message, err := wsConn.ReadMessage()
@@ -398,7 +432,7 @@ func (s *IntegrationTestSuite) readNWebSocketMessages(wsConn *websocket.Conn, co
 		}
 		output.WriteString(string(message))
 	}
-	
+
 	return output.String(), nil
 }
 
@@ -521,6 +555,19 @@ func (s *IntegrationTestSuite) waitForConsoleRemoval(nodeID string, timeout time
 		time.Sleep(2 * time.Second)
 	}
 	return fmt.Errorf("timed out waiting for console %s removal", nodeID)
+}
+
+// getRemoteConsoleAPIURL constructs the API URL for a container exposing port 26776
+func (s *IntegrationTestSuite) getRemoteConsoleAPIURL(container testcontainers.Container) (string, error) {
+	host, err := container.Host(s.ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get container host: %w", err)
+	}
+	port, err := container.MappedPort(s.ctx, "26776")
+	if err != nil {
+		return "", fmt.Errorf("failed to get container mapped port: %w", err)
+	}
+	return fmt.Sprintf("http://%s:%s", host, port.Port()), nil
 }
 
 func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {

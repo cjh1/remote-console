@@ -44,6 +44,7 @@ var conAggMutex = &sync.Mutex{}
 var conAggLogger *log.Logger = nil
 
 var conAggLogFile string = ""
+var conAggFile *os.File = nil
 
 // map to cancel threads tailing log files
 var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
@@ -78,7 +79,7 @@ func (ls *logsService) watchConsoleLogFile(ctx context.Context, consoleLogsPath 
 	log.Printf("Setting up tail of %s", filename)
 
 	// set up a tail operation on the console file
-	t, err := tail.TailFile(filename, tail.Config{Follow: true, ReOpen: true})
+	t, err := tail.TailFile(filename, tail.Config{Follow: true, ReOpen: true, MustExist: false})
 	if err != nil {
 		log.Printf("Error setting up tail on file %s:%s", filename, err)
 		return
@@ -118,14 +119,8 @@ func writeToAggLog(xname, line string) {
 	conAggLogger.Printf("%s [%s] %s", timestamp, xname, line)
 }
 
-// TODO with nxadm this should be necessary?
-// RespinAggLog reopens the aggregation log file (after rotation)
-func (ls *logsService) respinAggLog() {
-	conAggMutex.Lock()
-	defer conAggMutex.Unlock()
-
+func (ls *logsService) openAggLogLocked() {
 	if conAggLogFile == "" {
-		// build up the aggregation file name
 		hostname, err := os.Hostname()
 		if err != nil {
 			log.Printf("Error getting hostname:%s", err)
@@ -134,33 +129,57 @@ func (ls *logsService) respinAggLog() {
 		conAggLogFile = fmt.Sprintf("%s/consoleAgg-%s.log", ls.config.AggLogsPath, hostname)
 	}
 
-	// ensure the directory exists
 	dir := filepath.Dir(conAggLogFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Printf("Error creating aggregation log directory %s:%s", dir, err)
 		return
 	}
 
-	// open/create the aggregation log file
 	calf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		log.Printf("Error opening aggregation log file %s:%s", conAggLogFile, err)
 		return
 	}
 
-	if conAggLogger == nil {
-		log.Printf("Started aggregation log file: %s", conAggLogFile)
-	} else {
-		log.Printf("Restarted aggregation log file: %s", conAggLogFile)
-	}
-
+	conAggFile = calf
+	log.Printf("Started aggregation log file: %s", conAggLogFile)
 	conAggLogger = log.New(calf, "", 0)
 	conAggLogger.Print("Starting aggregation log")
+}
+
+// EnsureAggLog opens the aggregation log file if not already open.
+func (ls *logsService) EnsureAggLog() {
+	conAggMutex.Lock()
+	defer conAggMutex.Unlock()
+
+	if conAggLogger != nil {
+		return
+	}
+
+	ls.openAggLogLocked()
+}
+
+// reopenAggLog closes and reopens the aggregation log file (used after rotation).
+func (ls *logsService) reopenAggLog() {
+	conAggMutex.Lock()
+	defer conAggMutex.Unlock()
+
+	if conAggFile != nil {
+		if err := conAggFile.Close(); err != nil {
+			log.Printf("Error closing aggregation log file: %s", err)
+		}
+		conAggFile = nil
+	}
+	conAggLogger = nil
+	ls.openAggLogLocked()
 }
 
 func (ls *logsService) AggregateFiles(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo) {
 	fmt.Printf("AggregateFiles: Starting aggregation of console log files\n")
 	fmt.Printf("AggregateFiles: Starting aggregation of console log files: %d\n", len(nodes))
+
+	// Ensure the aggregation log file is ready before we start tailing console logs.
+	ls.EnsureAggLog()
 
 	for xname := range nodes {
 		// make sure the node is being aggregated - no-op if already being done

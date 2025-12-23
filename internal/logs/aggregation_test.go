@@ -179,16 +179,18 @@ func TestAggregateFiles(t *testing.T) {
 	}
 }
 
-func TestRespinAggLog(t *testing.T) {
+func TestAggregationLogReopen(t *testing.T) {
 	tempDir := t.TempDir()
 
 	// Set up aggregation log file path
 	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
+	conAggLogger = nil
+	conAggFile = nil
 
 	service := NewLogsService(DefaultLogConfig())
 
-	// First respin
-	service.respinAggLog()
+	// First open
+	service.EnsureAggLog()
 	require.NotNil(t, conAggLogger)
 
 	// Write a test line
@@ -198,7 +200,7 @@ func TestRespinAggLog(t *testing.T) {
 	firstLogger := conAggLogger
 
 	// Respin again
-	service.respinAggLog()
+	service.reopenAggLog()
 	require.NotNil(t, conAggLogger)
 
 	// Ensure the logger pointer has changed

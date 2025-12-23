@@ -37,7 +37,6 @@ import (
 	"time"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
-	"github.com/OpenCHAMI/remote-console/internal/utils"
 )
 
 // LogRotate initializes and starts log rotation
@@ -49,7 +48,7 @@ func (ls *logsService) initLogRotate() error {
 
 	// Set up the 'backups' directory for logrotation to use
 	fmt.Printf("Ensuring console log backup directory present: %s\n", ls.config.ConsoleLogsBackupPath)
-	err := utils.EnsureDirPresent(ls.config.ConsoleLogsBackupPath, 0755)
+	err := os.MkdirAll(ls.config.ConsoleLogsBackupPath, 0755)
 	if err != nil {
 		return fmt.Errorf("error ensuring console logs backup directory: %v", err)
 	}
@@ -252,7 +251,8 @@ func (ls *logsService) rotateLogsOnce(config LogConfig, consoleLogsPath string, 
 		time.Sleep(5 * time.Second)
 
 		if aggChanged {
-			ls.respinAggLog()
+			// Reopen the aggregation log file after rotation
+			ls.reopenAggLog()
 		}
 	} else {
 		log.Print("LOG ROTATE: No log files changed with logrotate")

@@ -5,16 +5,82 @@ import (
 	"io"
 	"strings"
 	"time"
+	"context"
 )
 
 // TestConsoleLogRotation tests that console log rotation works correctly
 // and that tailing WebSocket connections remain open, continuing to receiving
 // data after log rotation
 func (s *IntegrationTestSuite) TestConsoleLogRotation() {
-	fixture := consoleFixtures[0] // Use first fixture, we only need todo if for one
+	console := consoleFixtures["ssh-key"] // Use the SSH key console; only need to test one
+
+	// This test requires specific log rotation settings, so we have to stop to remote-console
+	// container and restart it with custom environment variables. This is not ideal, but more
+	// practical than having a separate test suite just for log rotation.
+	
+	remoteConsoleContainer, ok := s.containers["remote-console"]
+	s.Require().True(ok, "remote-console container should exist")
+
+	s.T().Log("Stopping remote-console container to reconfigure for log rotation test...")
+	timeout := time.Minute
+	err := remoteConsoleContainer.Stop(s.ctx, &timeout)
+	s.Require().NoError(err, "Failed to stop remote-console container")
+
+	env := map[string]string{
+		"RCS_LOG_ROTATE_CHECK_FREQUENCY": "5", // Check every 5 seconds
+		"RCS_CONSOLE_LOGS_FILE_SIZE":     "2K", // Small size to trigger rotation easily
+		"RCS_CONSOLE_LOGS_NUM_ROTATE":    "2", // Keep 2 rotated files
+	}
+
+	s.T().Log("Starting remote-console container with log rotation settings...")
+	logRotateRemoteConsoleContainer, err := startRemoteConsoleWithEnv(s.ctx, env, s.rcsNetwork.Name, s.consoleNetwork.Name)
+	if err != nil {
+		s.T().Logf("Failed to start remote-console container: %v", err)
+		// Try to get logs if the container was created but failed to start
+		if logRotateRemoteConsoleContainer != nil {
+			if logs, logErr := logRotateRemoteConsoleContainer.Logs(s.ctx); logErr == nil {
+				logBytes, _ := io.ReadAll(logs)
+				s.T().Logf("Container logs:\n%s", string(logBytes))
+			}
+		}
+	}
+	s.Require().NoError(err, "Failed to start remote-console container with log rotation settings")
+
+	// Ensure we clean up and restore state
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := logRotateRemoteConsoleContainer.Terminate(ctx); err != nil {
+			s.T().Logf("Warning: failed to terminate logrotate remote-console container: %v", err)
+		}
+
+		// Restart original remote-console container
+		s.T().Log("Restarting original remote-console container...")
+		err := remoteConsoleContainer.Start(s.ctx)
+		s.Require().NoError(err, "failed to restart original remote-console container")
+
+		// Restore API URL
+		s.apiURL, err = s.getRemoteConsoleAPIURL(remoteConsoleContainer)
+		s.Require().NoError(err, "failed to get API URL of original remote-console container")
+
+		// Wait for it to discover consoles again
+		s.T().Log("Waiting for original remote-console to discover consoles again...")
+		if err := s.waitForConsoles(5, 5*time.Minute); err != nil {
+			s.Require().NoError(err, "original remote-console did not rediscover consoles")
+		}
+	}()
+
+	// Update API URL to point to new container
+	s.apiURL, err = s.getRemoteConsoleAPIURL(logRotateRemoteConsoleContainer)
+	s.Require().NoError(err)
+
+	// Wait for the new container to discover consoles
+	s.T().Log("Waiting for remote-console to discover consoles...")
+	s.Require().NoError(s.waitForConsoles(5, 5*time.Minute), "remote-console did not discover expected consoles")
+
 
 	// Start a tailing connection with follow=true
-	followURL, err := s.tailWebSocketURL(fixture.nodeID, "follow=true")
+	followURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
 	s.Require().NoError(err)
 
 	tailConn, tailResp, err := s.dialWebSocket(followURL)
@@ -23,14 +89,14 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	defer tailConn.Close()
 
 	// Wait for readiness marker
-	if fixture.readyLogMarker != "" {
-		_, err = s.readWebSocketUntil(tailConn, fixture.readyLogMarker, tailMessageTimeout)
+	if console.readyLogMarker != "" {
+		_, err = s.readWebSocketUntil(tailConn, console.readyLogMarker, tailMessageTimeout)
 		s.Require().NoError(err, "Expected console readiness marker")
 	}
 
 	// Send messages before rotation to generate log content
 	preRotateMsg := uniqueMessage("pre-rotation")
-	exitCode, output, err := s.broadcastConsoleMessage(fixture, preRotateMsg)
+	exitCode, output, err := s.broadcastConsoleMessage(console, preRotateMsg)
 	s.Require().NoError(err)
 	s.T().Logf("Sent pre-rotation message (exit code %d): %s", exitCode, output)
 
@@ -38,12 +104,6 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	_, err = s.readWebSocketUntil(tailConn, preRotateMsg, tailMessageTimeout)
 	s.Require().NoError(err, "Tail should see pre-rotation message")
 
-	// Trigger log rotation
-	// Note: In a real integration test, you would:
-	// - Configure the remote-console service with a very small log size (e.g., 1K)
-	// - Send enough data to exceed that size
-	// - Wait for the log rotation check interval
-	//
 	// For now, we'll send a large amount of data and wait for rotation
 	s.T().Log("Generating large log content to trigger rotation...")
 	
@@ -52,8 +112,8 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	largeData := strings.Repeat("A", 512) // 512 bytes per message
 	for i := 0; i < 8; i++ { // 8 * 512 = 4KB, enough to exceed 2KB threshold
 		msg := fmt.Sprintf("%s-bulk-%d", uniqueMessage("rotation-trigger"), i)
-		exitCode, _, err := s.broadcastConsoleMessage(fixture, msg+" "+largeData)
-		s.Require().NoError(err)
+		exitCode, _, err := s.broadcastConsoleMessage(console, msg+" "+largeData)
+	s.Require().NoError(err)
 		s.T().Logf("Sent bulk message %d (exit code %d)", i, exitCode)
 		
 		// Read the message from tail
@@ -68,41 +128,33 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 
 	// Debug: Check logrotate configuration and try running it manually
 	s.T().Log("Checking logrotate configuration...")
-	rcsContainer, ok := s.containers["remote-console"]
-	s.Require().True(ok, "remote-console container should exist")
-
-	debugCmd := []string{"sh", "-c", "ls -la /usr/sbin/logrotate /sbin/logrotate 2>&1 && logrotate --version 2>&1"}
-	exitCodeDebug, readerDebug, err := rcsContainer.Exec(s.ctx, debugCmd)
-	s.Require().NoError(err)
-	debugOutput, err := io.ReadAll(readerDebug)
-	s.Require().NoError(err)
-	s.T().Logf("Logrotate debug (exit code %d):\n%s", exitCodeDebug, string(debugOutput))
-
+	
 	// Verify log rotation occurred by checking for rotated files in the container
 	s.T().Log("Checking for rotated log files in container...")
 
 	// Check for current and rotated log files (conman uses /tmp/conman/ as base directory)
 	checkCmd := []string{"sh", "-c", "ls -la /tmp/conman/ /tmp/conman.old/ 2>&1"}
-	exitCode, reader, err := rcsContainer.Exec(s.ctx, checkCmd)
+	exitCode, reader, err := logRotateRemoteConsoleContainer.Exec(s.ctx, checkCmd)
 	s.Require().NoError(err)
 	logOutput, err := io.ReadAll(reader)
 	s.Require().NoError(err)
 	s.T().Logf("Log files check (exit code %d):\n%s", exitCode, string(logOutput))
 
 	// Verify rotated log exists in backup directory
-	s.Require().Contains(string(logOutput), fmt.Sprintf("console.%s.1", fixture.nodeID),
-		"Should find rotated log file console.%s.1 in /tmp/conman.old/", fixture.nodeID)
+	s.Require().Contains(string(logOutput), fmt.Sprintf("console.%s.1", console.nodeID),
+		"Should find rotated log file console.%s.1 in /tmp/conman.old/", console.nodeID)
 
-	// 5. Send a message after rotation to verify tail still works
+	// Send a message after rotation to verify tail still works
 	postRotateMsg := uniqueMessage("post-rotation")
-	exitCode, output, err = s.broadcastConsoleMessage(fixture, postRotateMsg)
+	exitCode, output, err = s.broadcastConsoleMessage(console, postRotateMsg)
 	s.Require().NoError(err)
 	s.T().Logf("Sent post-rotation message (exit code %d): %s", exitCode, output)
 
-	// 6. Verify the tail connection is still alive and receives the new message
+	// Verify the tail connection is still alive and receives the new message
 	s.T().Log("Verifying tail connection still receives data after rotation...")
 	_, err = s.readWebSocketUntil(tailConn, postRotateMsg, tailMessageTimeout)
 	s.Require().NoError(err, "Tail connection should remain open and see post-rotation message")
 
 	s.T().Log("Log rotation test passed: tail connection remained alive through rotation")
+
 }

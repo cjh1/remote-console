@@ -3,42 +3,63 @@ package test
 import (
 	"fmt"
 	"io"
+	"sort"
 )
 
 type consoleFixture struct {
 	name           string
 	nodeID         string
 	containerKey   string
+	username       string
+	password       string
 	readyLogMarker string
 	prompt         string
 	broadcastCmd   func(msg string) []string
 }
 
-var consoleFixtures = []consoleFixture{
-	{
+func consoleFixtureList() []consoleFixture {
+	consoles := make([]consoleFixture, 0, len(consoleFixtures))
+	for _, f := range consoleFixtures {
+		consoles = append(consoles, f)
+	}
+	// sort to make iteration deterministic
+	sort.Slice(consoles, func(i, j int) bool {
+		return consoles[i].name < consoles[j].name
+	})
+	return consoles
+}
+
+var consoleFixtures = map[string]consoleFixture{
+	"ssh-password": {
 		name:           "ssh-password",
 		nodeID:         "x0c0s0b0",
 		containerKey:   "ssh-password",
+		username:       "ADMIN",
+		password:       "ADMIN",
 		readyLogMarker: "Welcome to OpenSSH Server",
 		prompt:         ":~$ ",
 		broadcastCmd: func(msg string) []string {
 			return []string{"broadcast.sh", msg}
 		},
 	},
-	{
+	"ssh-key": {
 		name:           "ssh-key",
 		nodeID:         "x0c0s1b0",
 		containerKey:   "ssh-key",
+		username:       "ADMIN",
+		password:       "",
 		readyLogMarker: "Welcome to OpenSSH Server",
 		prompt:         ":~$ ",
 		broadcastCmd: func(msg string) []string {
 			return []string{"broadcast.sh", msg}
 		},
 	},
-	{
+	"ipmi": {
 		name:           "ipmi",
 		nodeID:         "x0c0s2b0",
 		containerKey:   "ipmi",
+		username:       "root",
+		password:       "root_password",
 		readyLogMarker: "<ConMan> Console [x0c0s2b0] connected",
 		prompt:         "/ # ",
 		broadcastCmd: func(msg string) []string {
@@ -53,11 +74,11 @@ func (s *IntegrationTestSuite) broadcastConsoleMessage(f consoleFixture, msg str
 		return 0, "", fmt.Errorf("container %s not found", f.containerKey)
 	}
 	if f.broadcastCmd == nil {
-		return 0, "", fmt.Errorf("fixture %s does not support broadcasting", f.name)
+		return 0, "", fmt.Errorf("console %s does not support broadcasting", f.name)
 	}
 	cmd := f.broadcastCmd(msg)
 	if len(cmd) == 0 {
-		return 0, "", fmt.Errorf("fixture %s does not support broadcasting", f.name)
+		return 0, "", fmt.Errorf("console %s does not support broadcasting", f.name)
 	}
 	exitCode, reader, err := container.Exec(s.ctx, cmd)
 	if err != nil {
