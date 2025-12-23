@@ -3,9 +3,11 @@ package test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
@@ -242,6 +244,19 @@ func startSMD(ctx context.Context, networks ...string) (testcontainers.Container
 	})
 }
 
+// getSMDAPIURL returns the base API URL for the SMD container
+func getSMDAPIURL(ctx context.Context, smdContainer testcontainers.Container) (string, error) {
+	host, err := smdContainer.Host(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get SMD host: %w", err)
+	}
+	port, err := smdContainer.MappedPort(ctx, "27779")
+	if err != nil {
+		return "", fmt.Errorf("failed to get SMD port: %w", err)
+	}
+	return fmt.Sprintf("http://%s:%s/hsm/v2", host, port.Port()), nil
+}
+
 // startRedfishEmulator starts a Redfish emulator for a specific xname
 func startRedfishEmulator(ctx context.Context, network string, xname string, mock string, authConfig *string) (testcontainers.Container, error) {
 	env := map[string]string{
@@ -290,7 +305,7 @@ func startRedfishEmulator(ctx context.Context, network string, xname string, moc
 }
 
 // loadRedfishEndpoints loads Redfish endpoint information into SMD
-func loadRedfishEndpoints(ctx context.Context, network string, endpoints []redfishEndpoint) error {
+func loadRedfishEndpoints(ctx context.Context, smdAPIURL string, endpoints []redfishEndpoint) error {
 	if len(endpoints) == 0 {
 		return nil
 	}
@@ -306,61 +321,39 @@ func loadRedfishEndpoints(ctx context.Context, network string, endpoints []redfi
 	}
 	jsonPayload += `]}`
 
-	curlCmd := fmt.Sprintf("apk add curl && sleep 10 && curl -X POST -d '%s' http://smd:27779/hsm/v2/Inventory/RedfishEndpoints",
-		jsonPayload)
-
-	req := testcontainers.ContainerRequest{
-		Image:      "library/golang:1.24-alpine",
-		Networks:   []string{network},
-		Cmd:        []string{"sh", "-c", curlCmd},
-		WaitingFor: wait.ForExit().WithExitTimeout(60 * time.Second),
-	}
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
+	url := fmt.Sprintf("%s/Inventory/RedfishEndpoints", smdAPIURL)
+	resp, err := http.Post(url,
+		"application/json",
+		strings.NewReader(jsonPayload))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to post Redfish endpoints: %w", err)
 	}
+	defer resp.Body.Close()
 
-	// Check the exit code
-	state, err := container.State(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get container state: %w", err)
-	}
-	if state.ExitCode != 0 {
-		return fmt.Errorf("failed to load Redfish endpoints: container exited with code %d", state.ExitCode)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to load Redfish endpoints: status %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	return nil
 }
 
-func deleteRedfishEndpoint(ctx context.Context, network string, endpointID string) error {
-	cmd := fmt.Sprintf("apk add curl && curl -X DELETE http://smd:27779/hsm/v2/Inventory/RedfishEndpoints/%s", endpointID)
-
-	req := testcontainers.ContainerRequest{
-		Image:      "library/golang:1.24-alpine",
-		Networks:   []string{network},
-		Cmd:        []string{"sh", "-c", cmd},
-		WaitingFor: wait.ForExit().WithExitTimeout(30 * time.Second),
-	}
-
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
+func deleteRedfishEndpoint(ctx context.Context, smdAPIURL string, endpointID string) error {
+	url := fmt.Sprintf("%s/Inventory/RedfishEndpoints/%s", smdAPIURL, endpointID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create DELETE request: %w", err)
 	}
 
-	state, err := container.State(ctx)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to get container state: %w", err)
+		return fmt.Errorf("failed to delete Redfish endpoint: %w", err)
 	}
+	defer resp.Body.Close()
 
-	if state.ExitCode != 0 {
-		return fmt.Errorf("failed to delete Redfish endpoint %s: exit code %d", endpointID, state.ExitCode)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete Redfish endpoint %s: status %d, body: %s", endpointID, resp.StatusCode, string(body))
 	}
 
 	return nil

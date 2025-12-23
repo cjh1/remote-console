@@ -203,7 +203,10 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 		}
 	}()
 
-	err = loadRedfishEndpoints(s.ctx, s.rfNetwork.Name, []redfishEndpoint{{
+	smdAPIURL, err := getSMDAPIURL(s.ctx, s.containers["smd"])
+	s.Require().NoError(err)
+
+	err = loadRedfishEndpoints(s.ctx, smdAPIURL, []redfishEndpoint{{
 		Host:     newNodeID,
 		Username: "ADMIN",
 		Password: "ADMIN",
@@ -213,7 +216,12 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 	// Clean up the Redfish endpoint at the end to avoid interfering with other tests
 	defer func() {
 		s.T().Logf("Removing Redfish endpoint %s", newNodeID)
-		if err := deleteRedfishEndpoint(s.ctx, s.rfNetwork.Name, newNodeID); err != nil {
+		smdAPIURL, err := getSMDAPIURL(s.ctx, s.containers["smd"])
+		if err != nil {
+			s.T().Errorf("Warning: failed to get SMD API URL: %v", err)
+			return
+		}
+		if err := deleteRedfishEndpoint(s.ctx, smdAPIURL, newNodeID); err != nil {
 			s.T().Logf("Warning: failed to remove Redfish endpoint %s: %v", newNodeID, err)
 		}
 	}()

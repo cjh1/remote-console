@@ -187,7 +187,9 @@ func (s *IntegrationTestSuite) SetupSuite() {
 
 	s.T().Log("Loading Redfish endpoints into SMD...")
 	time.Sleep(5 * time.Second) // Give RF emulators time to fully start
-	err = loadRedfishEndpoints(s.ctx, rcsRfNet.Name, redfishEndpoints)
+	smdAPIURL, err := getSMDAPIURL(s.ctx, smdContainer)
+	require.NoError(s.T(), err)
+	err = loadRedfishEndpoints(s.ctx, smdAPIURL, redfishEndpoints)
 	require.NoError(s.T(), err)
 
 	s.T().Log("Overriding console credentials in Vault")
@@ -595,7 +597,10 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 		}
 	}()
 
-	err = loadRedfishEndpoints(s.ctx, s.rfNetwork.Name, []redfishEndpoint{{
+	smdAPIURL, err := getSMDAPIURL(s.ctx, s.containers["smd"])
+	s.Require().NoError(err)
+
+	err = loadRedfishEndpoints(s.ctx, smdAPIURL, []redfishEndpoint{{
 		Host:     newNodeID,
 		Username: "ADMIN",
 		Password: "ADMIN",
@@ -620,7 +625,9 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 		"Expected hostname command output in console output; got %q", hostnameOutput)
 
 	s.T().Log("Removing dynamic console registration")
-	err = deleteRedfishEndpoint(s.ctx, s.rfNetwork.Name, newNodeID)
+	smdAPIURL, err = getSMDAPIURL(s.ctx, s.containers["smd"])
+	s.Require().NoError(err)
+	err = deleteRedfishEndpoint(s.ctx, smdAPIURL, newNodeID)
 	s.Require().NoError(err, "failed to remove dynamic Redfish endpoint")
 	s.Require().NoError(s.waitForConsoleRemoval(newNodeID, 3*time.Minute), "remote-console did not drop dynamic console")
 
