@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -38,7 +39,7 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 			defer resp.Body.Close()
 			defer wsConn.Close()
 
-			tailOutput := s.readWebSocketMessages(wsConn, 30*time.Second)
+			tailOutput := s.readWebSocketMessages(wsConn, tailMessageTimeout)
 			s.T().Logf("Console tail output: %s", tailOutput)
 			s.Require().Contains(tailOutput, msg, fmt.Sprintf("Expected to find '%s' in console output", msg))
 		})
@@ -101,10 +102,10 @@ func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
 
-			_, err = s.readWebSocketUntil(firstConn, msg, 30*time.Second)
+			_, err = s.readWebSocketUntil(firstConn, msg, tailMessageTimeout)
 			s.Require().NoError(err, "first follow connection did not see broadcast message")
 
-			_, err = s.readWebSocketUntil(secondConn, msg, 30*time.Second)
+			_, err = s.readWebSocketUntil(secondConn, msg, tailMessageTimeout)
 			s.Require().NoError(err, "second follow connection did not see broadcast message")
 		})
 	}

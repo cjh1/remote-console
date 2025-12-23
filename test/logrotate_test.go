@@ -1,11 +1,11 @@
 package test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
 	"time"
-	"context"
 )
 
 // TestConsoleLogRotation tests that console log rotation works correctly
@@ -17,19 +17,20 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	// This test requires specific log rotation settings, so we have to stop to remote-console
 	// container and restart it with custom environment variables. This is not ideal, but more
 	// practical than having a separate test suite just for log rotation.
-	
-	remoteConsoleContainer, ok := s.containers["remote-console"]
-	s.Require().True(ok, "remote-console container should exist")
 
-	s.T().Log("Stopping remote-console container to reconfigure for log rotation test...")
-	timeout := time.Minute
-	err := remoteConsoleContainer.Stop(s.ctx, &timeout)
-	s.Require().NoError(err, "Failed to stop remote-console container")
+	// Stop the default remote-console container so we don't have two instances fighting over ports
+	defaultRC, ok := s.containers["remote-console"]
+	s.Require().True(ok, "default remote-console container should exist")
+	stopCtx, cancelStop := context.WithTimeout(s.ctx, time.Minute)
+	defer cancelStop()
+	s.T().Log("Terminating default remote-console container for log rotation test...")
+	s.Require().NoError(defaultRC.Terminate(stopCtx), "failed to terminate default remote-console container")
+	delete(s.containers, "remote-console")
 
 	env := map[string]string{
-		"RCS_LOG_ROTATE_CHECK_FREQUENCY": "5", // Check every 5 seconds
+		"RCS_LOG_ROTATE_CHECK_FREQUENCY": "5",  // Check every 5 seconds
 		"RCS_CONSOLE_LOGS_FILE_SIZE":     "2K", // Small size to trigger rotation easily
-		"RCS_CONSOLE_LOGS_NUM_ROTATE":    "2", // Keep 2 rotated files
+		"RCS_CONSOLE_LOGS_NUM_ROTATE":    "2",  // Keep 2 rotated files
 	}
 
 	s.T().Log("Starting remote-console container with log rotation settings...")
@@ -54,19 +55,20 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 			s.T().Logf("Warning: failed to terminate logrotate remote-console container: %v", err)
 		}
 
-		// Restart original remote-console container
-		s.T().Log("Restarting original remote-console container...")
-		err := remoteConsoleContainer.Start(s.ctx)
-		s.Require().NoError(err, "failed to restart original remote-console container")
+		// Recreate the default remote-console container to avoid lingering state
+		s.T().Log("Recreating default remote-console container...")
+		rc, err := startRemoteConsole(s.ctx, s.rcsNetwork.Name, s.consoleNetwork.Name)
+		s.Require().NoError(err, "failed to recreate default remote-console container")
+		s.containers["remote-console"] = rc
 
 		// Restore API URL
-		s.apiURL, err = s.getRemoteConsoleAPIURL(remoteConsoleContainer)
-		s.Require().NoError(err, "failed to get API URL of original remote-console container")
+		s.apiURL, err = s.getRemoteConsoleAPIURL(rc)
+		s.Require().NoError(err, "failed to get API URL of default remote-console container")
 
 		// Wait for it to discover consoles again
-		s.T().Log("Waiting for original remote-console to discover consoles again...")
+		s.T().Log("Waiting for default remote-console to discover consoles again...")
 		if err := s.waitForConsoles(5, 5*time.Minute); err != nil {
-			s.Require().NoError(err, "original remote-console did not rediscover consoles")
+			s.Require().NoError(err, "default remote-console did not rediscover consoles")
 		}
 	}()
 
@@ -77,7 +79,6 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	// Wait for the new container to discover consoles
 	s.T().Log("Waiting for remote-console to discover consoles...")
 	s.Require().NoError(s.waitForConsoles(5, 5*time.Minute), "remote-console did not discover expected consoles")
-
 
 	// Start a tailing connection with follow=true
 	followURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
@@ -106,16 +107,16 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 
 	// For now, we'll send a large amount of data and wait for rotation
 	s.T().Log("Generating large log content to trigger rotation...")
-	
+
 	// Send multiple messages to fill up the log
 	// With RCS_CONSOLE_LOGS_FILE_SIZE=2K, we need to write more than 2KB
 	largeData := strings.Repeat("A", 512) // 512 bytes per message
-	for i := 0; i < 8; i++ { // 8 * 512 = 4KB, enough to exceed 2KB threshold
+	for i := 0; i < 8; i++ {              // 8 * 512 = 4KB, enough to exceed 2KB threshold
 		msg := fmt.Sprintf("%s-bulk-%d", uniqueMessage("rotation-trigger"), i)
 		exitCode, _, err := s.broadcastConsoleMessage(console, msg+" "+largeData)
-	s.Require().NoError(err)
+		s.Require().NoError(err)
 		s.T().Logf("Sent bulk message %d (exit code %d)", i, exitCode)
-		
+
 		// Read the message from tail
 		_, err = s.readWebSocketUntil(tailConn, msg, tailMessageTimeout)
 		s.Require().NoError(err, "Tail should see bulk message %d", i)
@@ -128,7 +129,7 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 
 	// Debug: Check logrotate configuration and try running it manually
 	s.T().Log("Checking logrotate configuration...")
-	
+
 	// Verify log rotation occurred by checking for rotated files in the container
 	s.T().Log("Checking for rotated log files in container...")
 
