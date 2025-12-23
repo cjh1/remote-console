@@ -56,7 +56,7 @@ func TestWriteToAggLog(t *testing.T) {
 
 func TestWatchConsoleLogFile(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	config := DefaultLogConfig()
 	config.AggLogsPath = tempDir
 	service := NewLogsService(config)
@@ -223,4 +223,32 @@ func TestAggregationLogReopen(t *testing.T) {
 	logContents := string(data)
 	require.Contains(t, logContents, "Test line before respin")
 	require.Contains(t, logContents, "Test line after respin")
+}
+
+func TestAggregateFilesTailCleanup(t *testing.T) {
+	config := DefaultLogConfig()
+	service := NewLogsService(config)
+	consoleLogsPath := "/tmp" // test path, not used for actual file IO here
+
+	// Simulate two nodes
+	nodeInfos := map[string]*nodes.NodeConsoleInfo{
+		"x0c0s0b0": {},
+		"x0c0s1b0": {},
+	}
+	service.AggregateFiles(consoleLogsPath, nodeInfos)
+	if len(service.tailThreads) != 2 {
+		t.Fatalf("Expected 2 tail threads, got %d", len(service.tailThreads))
+	}
+
+	// Remove one node
+	nodeInfos = map[string]*nodes.NodeConsoleInfo{
+		"x0c0s1b0": {},
+	}
+	service.AggregateFiles(consoleLogsPath, nodeInfos)
+	if len(service.tailThreads) != 1 {
+		t.Fatalf("Expected 1 tail thread after removal, got %d", len(service.tailThreads))
+	}
+	if _, exists := service.tailThreads["x0c0s0b0"]; exists {
+		t.Fatalf("Tail thread for x0c0s0b0 should be cleaned up")
+	}
 }

@@ -38,12 +38,10 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
-// aggregateFile sets up tailing a log file to add to the aggregation file
-func (ls *logsService) aggregateFile(consoleLogsPath string, xname string) bool {
-	newFile := false
+// aggregateFile starts tailing a log file if not already running (idempotent)
+func (ls *logsService) aggregateFile(consoleLogsPath string, xname string) {
 	if _, ok := ls.tailThreads[xname]; !ok {
-		// indicate we are starting to watch this one
-		newFile = true
+
 		// set up a context and a cancel function for this thread
 		ctx, cancel := context.WithCancel(context.Background())
 		ls.tailThreads[xname] = &cancel
@@ -51,11 +49,10 @@ func (ls *logsService) aggregateFile(consoleLogsPath string, xname string) bool 
 		// record being tracked and forward log file contents
 		go ls.watchConsoleLogFile(ctx, consoleLogsPath, xname)
 	}
-	return newFile
 }
 
-// StopTailing stops tailing a console log file
-func (ls *logsService) StopTailing(xname string) {
+// stopTailing stops tailing a specific node's console log
+func (ls *logsService) stopTailing(xname string) {
 	if cancel, ok := ls.tailThreads[xname]; ok {
 		(*cancel)()
 		delete(ls.tailThreads, xname)
@@ -170,8 +167,16 @@ func (ls *logsService) AggregateFiles(consoleLogsPath string, nodes map[string]*
 	// Ensure the aggregation log file is ready before we start tailing console logs.
 	ls.EnsureAggLog()
 
+	// Start tailing any new nodes
 	for xname := range nodes {
-		// make sure the node is being aggregated - no-op if already being done
 		ls.aggregateFile(consoleLogsPath, xname)
+	}
+
+	// Stop tailing nodes that are no longer in the list
+	for xname := range ls.tailThreads {
+		if _, exists := nodes[xname]; !exists {
+			log.Printf("Node %s no longer present, stopping tail", xname)
+			ls.stopTailing(xname)
+		}
 	}
 }
