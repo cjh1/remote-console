@@ -31,7 +31,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/nxadm/tail"
@@ -39,25 +38,15 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
 
-// Global vars
-var conAggMutex = &sync.Mutex{}
-var conAggLogger *log.Logger = nil
-
-var conAggLogFile string = ""
-var conAggFile *os.File = nil
-
-// map to cancel threads tailing log files
-var tailThreads map[string]*context.CancelFunc = make(map[string]*context.CancelFunc)
-
 // aggregateFile sets up tailing a log file to add to the aggregation file
 func (ls *logsService) aggregateFile(consoleLogsPath string, xname string) bool {
 	newFile := false
-	if _, ok := tailThreads[xname]; !ok {
+	if _, ok := ls.tailThreads[xname]; !ok {
 		// indicate we are starting to watch this one
 		newFile = true
 		// set up a context and a cancel function for this thread
 		ctx, cancel := context.WithCancel(context.Background())
-		tailThreads[xname] = &cancel
+		ls.tailThreads[xname] = &cancel
 
 		// record being tracked and forward log file contents
 		go ls.watchConsoleLogFile(ctx, consoleLogsPath, xname)
@@ -66,10 +55,10 @@ func (ls *logsService) aggregateFile(consoleLogsPath string, xname string) bool 
 }
 
 // StopTailing stops tailing a console log file
-func StopTailing(xname string) {
-	if cancel, ok := tailThreads[xname]; ok {
+func (ls *logsService) StopTailing(xname string) {
+	if cancel, ok := ls.tailThreads[xname]; ok {
 		(*cancel)()
-		delete(tailThreads, xname)
+		delete(ls.tailThreads, xname)
 	}
 }
 
@@ -101,58 +90,58 @@ func (ls *logsService) watchConsoleLogFile(ctx context.Context, consoleLogsPath 
 				log.Printf("Error reading line from %s:%s", xname, line.Err)
 				continue
 			}
-			writeToAggLog(xname, line.Text)
+			ls.writeToAggLog(xname, line.Text)
 		}
 	}
 }
 
 // writeToAggLog writes a line to the aggregation log with proper locking
-func writeToAggLog(xname, line string) {
-	conAggMutex.Lock()
-	defer conAggMutex.Unlock()
+func (ls *logsService) writeToAggLog(xname, line string) {
+	ls.conAggMutex.Lock()
+	defer ls.conAggMutex.Unlock()
 
-	if conAggLogger == nil {
+	if ls.conAggLogger == nil {
 		return
 	}
 
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	conAggLogger.Printf("%s [%s] %s", timestamp, xname, line)
+	ls.conAggLogger.Printf("%s [%s] %s", timestamp, xname, line)
 }
 
 func (ls *logsService) openAggLogLocked() {
-	if conAggLogFile == "" {
+	if ls.conAggLogFile == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
 			log.Printf("Error getting hostname:%s", err)
 			hostname = "unknown"
 		}
-		conAggLogFile = fmt.Sprintf("%s/consoleAgg-%s.log", ls.config.AggLogsPath, hostname)
+		ls.conAggLogFile = fmt.Sprintf("%s/consoleAgg-%s.log", ls.config.AggLogsPath, hostname)
 	}
 
-	dir := filepath.Dir(conAggLogFile)
+	dir := filepath.Dir(ls.conAggLogFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Printf("Error creating aggregation log directory %s:%s", dir, err)
 		return
 	}
 
-	calf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	calf, err := os.OpenFile(ls.conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		log.Printf("Error opening aggregation log file %s:%s", conAggLogFile, err)
+		log.Printf("Error opening aggregation log file %s:%s", ls.conAggLogFile, err)
 		return
 	}
 
-	conAggFile = calf
-	log.Printf("Started aggregation log file: %s", conAggLogFile)
-	conAggLogger = log.New(calf, "", 0)
-	conAggLogger.Print("Starting aggregation log")
+	ls.conAggFile = calf
+	log.Printf("Started aggregation log file: %s", ls.conAggLogFile)
+	ls.conAggLogger = log.New(calf, "", 0)
+	ls.conAggLogger.Print("Starting aggregation log")
 }
 
 // EnsureAggLog opens the aggregation log file if not already open.
 func (ls *logsService) EnsureAggLog() {
-	conAggMutex.Lock()
-	defer conAggMutex.Unlock()
+	ls.conAggMutex.Lock()
+	defer ls.conAggMutex.Unlock()
 
-	if conAggLogger != nil {
+	if ls.conAggLogger != nil {
 		return
 	}
 
@@ -161,16 +150,16 @@ func (ls *logsService) EnsureAggLog() {
 
 // reopenAggLog closes and reopens the aggregation log file (used after rotation).
 func (ls *logsService) reopenAggLog() {
-	conAggMutex.Lock()
-	defer conAggMutex.Unlock()
+	ls.conAggMutex.Lock()
+	defer ls.conAggMutex.Unlock()
 
-	if conAggFile != nil {
-		if err := conAggFile.Close(); err != nil {
+	if ls.conAggFile != nil {
+		if err := ls.conAggFile.Close(); err != nil {
 			log.Printf("Error closing aggregation log file: %s", err)
 		}
-		conAggFile = nil
+		ls.conAggFile = nil
 	}
-	conAggLogger = nil
+	ls.conAggLogger = nil
 	ls.openAggLogLocked()
 }
 

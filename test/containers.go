@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/modules/vault"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -22,29 +24,30 @@ type redfishEndpoint struct {
 
 // startVault starts a Vault container with development mode enabled
 func startVault(ctx context.Context, networks ...string) (testcontainers.Container, error) {
-	req := testcontainers.ContainerRequest{
-		Image:          "docker.io/library/vault:1.5.5",
-		Hostname:       "vault",
-		Networks:       networks,
-		NetworkAliases: map[string][]string{},
-		Env: map[string]string{
-			"VAULT_DEV_ROOT_TOKEN_ID":  "hms",
-			"VAULT_DEV_LISTEN_ADDRESS": "0.0.0.0:8200",
-			"VAULT_ADDR":               "http://127.0.0.1:8200",
-		},
-		ExposedPorts: []string{"8200/tcp"},
-		WaitingFor:   wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp").WithStartupTimeout(60 * time.Second),
-		CapAdd:       []string{"IPC_LOCK"},
+	opts := []testcontainers.ContainerCustomizer{
+		vault.WithToken("hms"),
 	}
 
-	for _, network := range networks {
-		req.NetworkAliases[network] = []string{"vault"}
+	// Add networks and additional configuration if specified
+	if len(networks) > 0 {
+		networkAliases := make(map[string][]string)
+		for _, network := range networks {
+			networkAliases[network] = []string{"vault"}
+		}
+		opts = append(opts, testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Hostname:       "vault",
+				Networks:       networks,
+				NetworkAliases: networkAliases,
+				Env: map[string]string{
+					"VAULT_DEV_LISTEN_ADDRESS": "0.0.0.0:8200",
+					"VAULT_ADDR":               "http://127.0.0.1:8200",
+				},
+			},
+		}))
 	}
 
-	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
+	return vault.Run(ctx, "vault:1.5.5", opts...)
 }
 
 // enableVaultKV enables KV store in Vault
@@ -71,72 +74,54 @@ func enableVaultKV(ctx context.Context, network string) error {
 }
 
 // loadSSHKeysIntoVault loads SSH keys from the local filesystem into Vault
-func loadSSHKeysIntoVault(ctx context.Context, network string, sshKeyPath string) error {
+func loadSSHKeysIntoVault(ctx context.Context, vaultContainer testcontainers.Container, sshKeyPath string) error {
 	if _, err := os.Stat(sshKeyPath); err != nil {
 		return fmt.Errorf("SSH key not found at %s: %w", sshKeyPath, err)
 	}
 
-	req := testcontainers.ContainerRequest{
-		Image:    "docker.io/library/vault:1.5.5",
-		Networks: []string{network},
-		Env: map[string]string{
-			"VAULT_ADDR":      "http://vault:8200",
-			"VAULT_TOKEN":     "hms",
-			"VAULT_BASE_PATH": "hms-creds",
-		},
-		Files: []testcontainers.ContainerFile{
-			{
-				HostFilePath:      sshKeyPath,
-				ContainerFilePath: "/tmp/bmc-console-key",
-				FileMode:          0400,
-			},
-		},
-		Cmd: []string{
-			"sh", "-c",
-			"until vault status 2>/dev/null; do echo 'Waiting for vault...'; sleep 2; done && " +
-				"vault kv put $VAULT_BASE_PATH/bmc-console-keys PrivateKey=@/tmp/bmc-console-key",
-		},
-		WaitingFor: wait.ForExit().WithExitTimeout(30 * time.Second),
+	// Copy the key file into the vault container
+	err := vaultContainer.CopyFileToContainer(ctx, sshKeyPath, "/tmp/bmc-console-key", 0400)
+	if err != nil {
+		return fmt.Errorf("failed to copy SSH key to vault container: %w", err)
 	}
 
-	_, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	return err
+	// Execute vault command to store the key
+	cmd := []string{
+		"vault", "kv", "put",
+		"hms-creds/bmc-console-keys",
+		"PrivateKey=@/tmp/bmc-console-key",
+	}
+
+	exitCode, reader, err := vaultContainer.Exec(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("failed to exec vault command: %w", err)
+	}
+
+	output, _ := io.ReadAll(reader)
+	if exitCode != 0 {
+		return fmt.Errorf("failed to store SSH key in vault: exit code %d, output: %s", exitCode, string(output))
+	}
+
+	return nil
 }
 
-// TODO I think this can be done by exec into the existing vault container? Would that be better?
-func setConsoleCredentials(ctx context.Context, network, xname, username, password string) error {
-	cmd := fmt.Sprintf("vault kv put hms-creds/%s Username=%s Password='%s' Xname=%s",
-		xname, username, password, xname)
-
-	req := testcontainers.ContainerRequest{
-		Image:    "docker.io/library/vault:1.5.5",
-		Networks: []string{network},
-		Env: map[string]string{
-			"VAULT_ADDR":  "http://vault:8200",
-			"VAULT_TOKEN": "hms",
-		},
-		Cmd:        []string{"sh", "-c", cmd},
-		WaitingFor: wait.ForExit().WithExitTimeout(30 * time.Second),
+func setConsoleCredentials(ctx context.Context, vaultContainer testcontainers.Container, xname, username, password string) error {
+	cmd := []string{
+		"vault", "kv", "put",
+		fmt.Sprintf("hms-creds/%s", xname),
+		fmt.Sprintf("Username=%s", username),
+		fmt.Sprintf("Password=%s", password),
+		fmt.Sprintf("Xname=%s", xname),
 	}
 
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
+	exitCode, reader, err := vaultContainer.Exec(ctx, cmd)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to exec vault command: %w", err)
 	}
 
-	state, err := container.State(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get container state: %w", err)
-	}
-
-	if state.ExitCode != 0 {
-		return fmt.Errorf("failed to store credentials for %s: exit code %d", xname, state.ExitCode)
+	output, _ := io.ReadAll(reader)
+	if exitCode != 0 {
+		return fmt.Errorf("failed to store credentials for %s: exit code %d, output: %s", xname, exitCode, string(output))
 	}
 
 	return nil
@@ -144,26 +129,24 @@ func setConsoleCredentials(ctx context.Context, network, xname, username, passwo
 
 // startPostgres starts a PostgreSQL container
 func startPostgres(ctx context.Context, network string) (testcontainers.Container, error) {
-	req := testcontainers.ContainerRequest{
-		Image:    "docker.io/library/postgres:11-alpine",
-		Hostname: "postgres",
-		Networks: []string{network},
-		NetworkAliases: map[string][]string{
-			network: {"postgres"},
-		},
-		Env: map[string]string{
-			"POSTGRES_PASSWORD": "postgres",
-			"POSTGRES_USER":     "postgres",
-			"POSTGRES_DB":       "hmsds",
-		},
-		ExposedPorts: []string{"5432/tcp"},
-		WaitingFor:   wait.ForLog("database system is ready to accept connections").WithStartupTimeout(60 * time.Second),
-	}
-
-	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
+	return postgres.Run(ctx,
+		"postgres:11-alpine",
+		postgres.WithDatabase("hmsds"),
+		postgres.WithUsername("postgres"),
+		postgres.WithPassword("postgres"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").WithStartupTimeout(60*time.Second),
+		),
+		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Hostname: "postgres",
+				Networks: []string{network},
+				NetworkAliases: map[string][]string{
+					network: {"postgres"},
+				},
+			},
+		}),
+	)
 }
 
 // initSMDDatabase initializes the SMD database schema

@@ -89,6 +89,7 @@ type IntegrationTestSuite struct {
 	ctx            context.Context
 	apiURL         string
 	containers     map[string]testcontainers.Container
+	vaultContainer testcontainers.Container
 	rcsNetwork     *testcontainers.DockerNetwork
 	rfNetwork      *testcontainers.DockerNetwork
 	consoleNetwork *testcontainers.DockerNetwork
@@ -120,6 +121,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.T().Log("Starting Vault...")
 	vaultContainer, err := startVault(s.ctx, s.rcsNetwork.Name, s.consoleNetwork.Name)
 	require.NoError(s.T(), err)
+	s.vaultContainer = vaultContainer
 	s.containers["vault"] = vaultContainer
 
 	// Enable KV store in Vault
@@ -127,12 +129,19 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	err = enableVaultKV(s.ctx, s.rcsNetwork.Name)
 	require.NoError(s.T(), err)
 
+	// Set initial console credentials for SSH key auth nodes
+	s.T().Log("Setting initial console credentials in Vault...")
+	err = setConsoleCredentials(s.ctx, s.vaultContainer, "x0c0s1b0", "ADMIN", "")
+	require.NoError(s.T(), err)
+	err = setConsoleCredentials(s.ctx, s.vaultContainer, "x0c0s1b0n0", "ADMIN", "")
+	require.NoError(s.T(), err)
+
 	// Load SSH keys into Vault (if available)
 	s.T().Log("Loading SSH keys into Vault...")
 	s.T().Log("Generating temporary SSH key pair for tests")
 	sshKeyPath, publicKey, genErr := s.generateTempSSHKeyPair()
 	require.NoError(s.T(), genErr)
-	err = loadSSHKeysIntoVault(s.ctx, s.rcsNetwork.Name, sshKeyPath)
+	err = loadSSHKeysIntoVault(s.ctx, s.vaultContainer, sshKeyPath)
 	require.NoError(s.T(), err)
 
 	// Start Postgres
@@ -193,14 +202,6 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	smdAPIURL, err := getSMDAPIURL(s.ctx, smdContainer)
 	require.NoError(s.T(), err)
 	err = loadRedfishEndpoints(s.ctx, smdAPIURL, redfishEndpoints)
-	require.NoError(s.T(), err)
-
-	s.T().Log("Overriding console credentials in Vault")
-	// This is needed to set the password to empty so the remote-console knows to use SSH key auth
-	// TODO SMD will not create the entry in Vault if the password is empty, so we have to set it here manually.
-	// We may need another approach later.
-	err = setConsoleCredentials(s.ctx, s.rcsNetwork.Name, "x0c0s1b0", "ADMIN", "")
-	err = setConsoleCredentials(s.ctx, s.rcsNetwork.Name, "x0c0s1b0n0", "ADMIN", "")
 	require.NoError(s.T(), err)
 
 	// Start SSH password server

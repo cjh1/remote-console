@@ -78,12 +78,12 @@ func (ls *logsService) UpdateLogRotateConf(consoleLogsPath string, nodes map[str
 	fmt.Fprintln(lrf, "# Auto-generated conman log rotation configuration file.")
 
 	// Add the aggregation file
-	if conAggLogFile != "" {
-		conAggLogDir := filepath.Dir(conAggLogFile)
+	if ls.conAggLogFile != "" {
+		conAggLogDir := filepath.Dir(ls.conAggLogFile)
 		if len(conAggLogDir) > 0 {
-			writeConfigEntry(lrf, conAggLogFile, conAggLogDir, ls.config.AggLogsNumRotate, ls.config.AggLogsFileSize)
+			writeConfigEntry(lrf, ls.conAggLogFile, conAggLogDir, ls.config.AggLogsNumRotate, ls.config.AggLogsFileSize)
 		} else {
-			log.Printf("Invalid aggregation file name/dir, not added to log rotation: %s, %s", conAggLogFile, conAggLogDir)
+			log.Printf("Invalid aggregation file name/dir, not added to log rotation: %s, %s", ls.conAggLogFile, conAggLogDir)
 		}
 	}
 
@@ -116,7 +116,7 @@ func writeConfigEntry(lrf *os.File, fileName string, oldDir string, numRotate in
 	fmt.Fprintln(lrf, "}")
 }
 
-func parseTimestamp(config LogConfig, consoleLogsPath string, line string) (string, time.Time, bool, bool) {
+func parseTimestamp(config LogConfig, consoleLogsPath string, conAggLogFile string, line string) (string, time.Time, bool, bool) {
 	var nodeName string
 	var fd time.Time
 	isCon := false
@@ -159,7 +159,7 @@ func parseTimestamp(config LogConfig, consoleLogsPath string, line string) (stri
 	return nodeName, fd, isCon, isAgg
 }
 
-func readLogRotTimestamps(config LogConfig, consoleLogsPath string, fileStamp map[string]time.Time) (conChanged, aggChanged bool) {
+func readLogRotTimestamps(config LogConfig, consoleLogsPath string, conAggLogFile string, fileStamp map[string]time.Time) (conChanged, aggChanged bool) {
 	log.Printf("LOG ROTATE: Reading log rotation timestamps")
 	conChanged = false
 	aggChanged = false
@@ -188,7 +188,7 @@ func readLogRotTimestamps(config LogConfig, consoleLogsPath string, fileStamp ma
 
 		fmt.Println(line)
 
-		if fileName, fd, isCon, isAgg := parseTimestamp(config, consoleLogsPath, line); isCon || isAgg {
+		if fileName, fd, isCon, isAgg := parseTimestamp(config, consoleLogsPath, conAggLogFile, line); isCon || isAgg {
 			if _, ok := fileStamp[fileName]; ok {
 				if fileStamp[fileName] != fd {
 					log.Printf("LOG ROTATE:  %s rotated", fileName)
@@ -221,7 +221,7 @@ func (ls *logsService) LogRotate(consoleLogsPath string) bool {
 
 	consoleLogChanged := false
 	fileStamp := make(map[string]time.Time)
-	readLogRotTimestamps(ls.config, consoleLogsPath, fileStamp)
+	readLogRotTimestamps(ls.config, consoleLogsPath, ls.conAggLogFile, fileStamp)
 
 	if ls.config.LogRotateEnabled {
 		consoleLogChanged = ls.rotateLogsOnce(ls.config, consoleLogsPath, fileStamp)
@@ -247,7 +247,7 @@ func (ls *logsService) rotateLogsOnce(config LogConfig, consoleLogsPath string, 
 	}
 	log.Printf("LOG ROTATE: Log Rotation completed with exit code: %d", exitCode)
 
-	if conChanged, aggChanged = readLogRotTimestamps(config, consoleLogsPath, fileStamp); aggChanged {
+	if conChanged, aggChanged = readLogRotTimestamps(config, consoleLogsPath, "", fileStamp); aggChanged {
 		time.Sleep(5 * time.Second)
 
 		if aggChanged {

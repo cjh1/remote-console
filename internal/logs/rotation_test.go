@@ -26,17 +26,18 @@ func TestInitNewLogsService(t *testing.T) {
 
 func TestUpdateLogRotateConf(t *testing.T) {
 	tempDir := t.TempDir()
-	conAggLogFile = "/tmp/consoleAgg-test.log"
 
 	config := DefaultLogConfig()
 	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
+	config.AggLogsPath = tempDir
+
+	service := NewLogsService(config)
+	service.conAggLogFile = "/tmp/consoleAgg-test.log"
 
 	nodes := map[string]*nodes.NodeConsoleInfo{
 		"x0c0s1b0": {ID: "x0c0s1b0"},
 		"x0c0s1b1": {ID: "x0c0s1b1"},
 	}
-
-	service := NewLogsService(config)
 
 	service.UpdateLogRotateConf("/var/log/conman", nodes)
 
@@ -117,7 +118,7 @@ func TestReadLogRotTimestamps(t *testing.T) {
 
 	fileStamp := make(map[string]time.Time)
 	// Read the timestamps
-	conChanged, aggChanged := readLogRotTimestamps(config, "/var/log/conman", fileStamp)
+	conChanged, aggChanged := readLogRotTimestamps(config, "/var/log/conman", "", fileStamp)
 	require.True(t, conChanged, "Console logs should show changes")
 	require.False(t, aggChanged, "Aggregation log should not show changes")
 
@@ -218,7 +219,7 @@ func TestReadLogRotTimestampsNoEntries(t *testing.T) {
 
 	fileStamp := make(map[string]time.Time)
 	// Read the timestamps
-	conChanged, aggChanged := readLogRotTimestamps(config, "/var/log/conman", fileStamp)
+	conChanged, aggChanged := readLogRotTimestamps(config, "/var/log/conman", "", fileStamp)
 	require.False(t, conChanged, "Console logs should not show changes")
 	require.False(t, aggChanged, "Aggregation log should not show changes")
 

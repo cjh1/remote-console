@@ -17,15 +17,20 @@ import (
 func TestWriteToAggLog(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Set up aggregation log file path
-	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
-	lf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	// Create a logs service
+	config := DefaultLogConfig()
+	config.AggLogsPath = tempDir
+	service := NewLogsService(config)
+
+	// Initialize aggregation log
+	service.conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
+	lf, err := os.OpenFile(service.conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	require.NoError(t, err)
 
 	// Initialize logger
-	conAggMutex.Lock()
-	conAggLogger = log.New(lf, "", log.LstdFlags)
-	conAggMutex.Unlock()
+	service.conAggMutex.Lock()
+	service.conAggLogger = log.New(lf, "", log.LstdFlags)
+	service.conAggMutex.Unlock()
 
 	testLines := map[string]string{
 		"x0c0s1b0": "First log line",
@@ -34,11 +39,11 @@ func TestWriteToAggLog(t *testing.T) {
 	}
 
 	for xname, line := range testLines {
-		writeToAggLog(xname, line)
+		service.writeToAggLog(xname, line)
 	}
 
 	// Read back the aggregation log file and verify contents
-	data, err := os.ReadFile(conAggLogFile)
+	data, err := os.ReadFile(service.conAggLogFile)
 	require.NoError(t, err)
 
 	logContents := string(data)
@@ -51,15 +56,20 @@ func TestWriteToAggLog(t *testing.T) {
 
 func TestWatchConsoleLogFile(t *testing.T) {
 	tempDir := t.TempDir()
+	
+	config := DefaultLogConfig()
+	config.AggLogsPath = tempDir
+	service := NewLogsService(config)
+
 	// Set up aggregation log file path
-	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
-	lf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	service.conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
+	lf, err := os.OpenFile(service.conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	require.NoError(t, err)
 
 	// Initialize logger
-	conAggMutex.Lock()
-	conAggLogger = log.New(lf, "", log.LstdFlags)
-	conAggMutex.Unlock()
+	service.conAggMutex.Lock()
+	service.conAggLogger = log.New(lf, "", log.LstdFlags)
+	service.conAggMutex.Unlock()
 
 	// Set up a console log file
 	testXname := "x0c0s1b0"
@@ -69,13 +79,9 @@ func TestWatchConsoleLogFile(t *testing.T) {
 	require.NoError(t, err)
 	defer lf.Close()
 
-	config := DefaultLogConfig()
-
 	// Start watching the console log file
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	service := NewLogsService(config)
 
 	go service.watchConsoleLogFile(ctx, tempDir, testXname)
 
@@ -97,7 +103,7 @@ func TestWatchConsoleLogFile(t *testing.T) {
 	cancel()
 
 	// Read back the aggregation log file and verify contents
-	data, err := os.ReadFile(conAggLogFile)
+	data, err := os.ReadFile(service.conAggLogFile)
 	require.NoError(t, err)
 
 	logContents := string(data)
@@ -110,15 +116,19 @@ func TestWatchConsoleLogFile(t *testing.T) {
 func TestAggregateFiles(t *testing.T) {
 	tempDir := t.TempDir()
 
+	config := DefaultLogConfig()
+	config.AggLogsPath = tempDir
+	service := NewLogsService(config)
+
 	// Set up aggregation log file path
-	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
-	lf, err := os.OpenFile(conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	service.conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
+	lf, err := os.OpenFile(service.conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	require.NoError(t, err)
 
 	// Initialize logger
-	conAggMutex.Lock()
-	conAggLogger = log.New(lf, "", log.LstdFlags)
-	conAggMutex.Unlock()
+	service.conAggMutex.Lock()
+	service.conAggLogger = log.New(lf, "", log.LstdFlags)
+	service.conAggMutex.Unlock()
 
 	// Set up console log files
 	testXnames := []string{"x0c0s1b0", "x0c0s1b1"}
@@ -132,8 +142,6 @@ func TestAggregateFiles(t *testing.T) {
 		consoleLogFiles[xname] = consoleLogFile
 	}
 
-	config := DefaultLogConfig()
-
 	// Prepare node console info map
 	nodeMap := make(map[string]*nodes.NodeConsoleInfo)
 	for _, xname := range testXnames {
@@ -142,7 +150,6 @@ func TestAggregateFiles(t *testing.T) {
 		}
 	}
 
-	service := NewLogsService(config)
 	// Start aggregating files
 	service.AggregateFiles(tempDir, nodeMap)
 
@@ -166,7 +173,7 @@ func TestAggregateFiles(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Read back the aggregation log file and verify contents
-	data, err := os.ReadFile(conAggLogFile)
+	data, err := os.ReadFile(service.conAggLogFile)
 	require.NoError(t, err)
 
 	logContents := string(data)
@@ -182,35 +189,35 @@ func TestAggregateFiles(t *testing.T) {
 func TestAggregationLogReopen(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Set up aggregation log file path
-	conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
-	conAggLogger = nil
-	conAggFile = nil
+	config := DefaultLogConfig()
+	config.AggLogsPath = tempDir
+	service := NewLogsService(config)
 
-	service := NewLogsService(DefaultLogConfig())
+	// Set up aggregation log file path
+	service.conAggLogFile = filepath.Join(tempDir, "consoleAgg-test.log")
 
 	// First open
 	service.EnsureAggLog()
-	require.NotNil(t, conAggLogger)
+	require.NotNil(t, service.conAggLogger)
 
 	// Write a test line
-	writeToAggLog("x0c0s1b0", "Test line before respin")
+	service.writeToAggLog("x0c0s1b0", "Test line before respin")
 
 	// Capture the current logger pointer
-	firstLogger := conAggLogger
+	firstLogger := service.conAggLogger
 
 	// Respin again
 	service.reopenAggLog()
-	require.NotNil(t, conAggLogger)
+	require.NotNil(t, service.conAggLogger)
 
 	// Ensure the logger pointer has changed
-	require.NotEqual(t, firstLogger, conAggLogger)
+	require.NotEqual(t, firstLogger, service.conAggLogger)
 
 	// Write another test line
-	writeToAggLog("x0c0s1b0", "Test line after respin")
+	service.writeToAggLog("x0c0s1b0", "Test line after respin")
 
 	// Read back the aggregation log file and verify contents
-	data, err := os.ReadFile(conAggLogFile)
+	data, err := os.ReadFile(service.conAggLogFile)
 	require.NoError(t, err)
 
 	logContents := string(data)

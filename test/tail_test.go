@@ -2,7 +2,6 @@ package test
 
 import (
 	"fmt"
-	"io"
 	"strings"
 	"time"
 )
