@@ -522,8 +522,3 @@ func startRemoteConsoleWithEnv(ctx context.Context, envOverrides map[string]stri
 func startRemoteConsole(ctx context.Context, networks ...string) (testcontainers.Container, error) {
 	return startRemoteConsoleWithEnv(ctx, nil, networks...)
 }
-
-// getDefaultSSHKeyPath returns the default SSH key path for testing
-func getDefaultSSHKeyPath() string {
-	return filepath.Join(os.Getenv("HOME"), ".ssh", "console-test")
-}

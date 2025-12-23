@@ -42,7 +42,7 @@ func uniqueMessage(prefix string) string {
 }
 
 // generateTempSSHKeyPair creates a temporary keypair for testing and returns the private key path and public key string.
-func generateTempSSHKeyPair() (string, string, error) {
+func (s *IntegrationTestSuite) generateTempSSHKeyPair() (string, string, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", "", fmt.Errorf("generate ed25519 key: %w", err)
@@ -54,13 +54,16 @@ func generateTempSSHKeyPair() (string, string, error) {
 		return "", "", fmt.Errorf("marshal private key: %w", err)
 	}
 
-	privFile, err := os.CreateTemp("", "rcs-test-key-*")
+	// Create key file in temp directory (automatically cleaned up)
+	tempDir := s.T().TempDir()
+	keyPath := filepath.Join(tempDir, "ssh-test-key")
+	privFile, err := os.Create(keyPath)
 	if err != nil {
 		return "", "", fmt.Errorf("create temp private key: %w", err)
 	}
 	defer privFile.Close()
 
-	if err := os.Chmod(privFile.Name(), 0600); err != nil {
+	if err := os.Chmod(keyPath, 0600); err != nil {
 		return "", "", fmt.Errorf("chmod private key: %w", err)
 	}
 	
@@ -76,7 +79,7 @@ func generateTempSSHKeyPair() (string, string, error) {
 	}
 	pubKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
 
-	return privFile.Name(), pubKey, nil
+	return keyPath, pubKey, nil
 }
 
 // IntegrationTestSuite is the test suite for remote-console integration tests
@@ -127,7 +130,7 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	// Load SSH keys into Vault (if available)
 	s.T().Log("Loading SSH keys into Vault...")
 	s.T().Log("Generating temporary SSH key pair for tests")
-	sshKeyPath, publicKey, genErr := generateTempSSHKeyPair()
+	sshKeyPath, publicKey, genErr := s.generateTempSSHKeyPair()
 	require.NoError(s.T(), genErr)
 	err = loadSSHKeysIntoVault(s.ctx, s.rcsNetwork.Name, sshKeyPath)
 	require.NoError(s.T(), err)
