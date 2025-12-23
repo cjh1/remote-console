@@ -295,8 +295,8 @@ func (s *interactiveConsoleSession) streamOutput() {
 		if n > 0 {
 			log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
 			
-			// Apply rate limiting (convert bytes to KB for rate limiter units)
-			kb := uint16((n + 1023) / 1024) // Round up to nearest KB
+			// Apply rate limiting (convert bytes to KB, rounded up)
+			kb := uint16((n + 1023) / 1024)
 			for !s.rateLimiter.Pour(kb) {
 				log.Printf("Rate limit reached for console %s, waiting for capacity", s.nodeID)
 				time.Sleep(100 * time.Millisecond) // Wait for bucket to drain

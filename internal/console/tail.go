@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
+	
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail"
 	"github.com/nxadm/tail/ratelimiter"
@@ -113,8 +113,8 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 		log.Printf("before write")
 		log.Printf("Sending line:  follow: %v, %s", follow, lineText)
 		
-		// Apply rate limiting (convert bytes to KB for rate limiter units)
-		kb := uint16((len(lineText) + 1023) / 1024) // Round up to nearest KB
+		// Apply rate limiting (convert bytes to KB, rounded up)
+		kb := uint16((len(lineText) + 1023) / 1024)
 		for !cts.rateLimiter.Pour(kb) {
 			log.Printf("Rate limit reached for tail %s, waiting for capacity", cts.nodeID)
 			time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
@@ -145,6 +145,11 @@ func readLastNLines(filename string, numLines int) ([]string, int64, error) {
 	count := 0
 
 	scanner := bufio.NewScanner(file)
+	// Set max line length to 1MB (well below the 10MB bucket capacity)
+	const maxLineLength = 1024 * 1024
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxLineLength)
+	
 	for scanner.Scan() {
 		r.Value = scanner.Text()
 		r = r.Next()
@@ -201,8 +206,8 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 				fmt.Printf("Sending line: follow: %v: %s\n", follow, line)
 				lineText := line + "\n"
 				
-				// Apply rate limiting (convert bytes to KB for rate limiter units)
-				kb := uint16((len(lineText) + 1023) / 1024) // Round up to nearest KB
+			// Apply rate limiting (convert bytes to KB, rounded up)
+			kb := uint16((len(lineText) + 1023) / 1024)
 				for !cts.rateLimiter.Pour(kb) {
 					log.Printf("Rate limit reached for tail %s (history), waiting for capacity", cts.nodeID)
 					time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
@@ -251,10 +256,11 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
 	// Configuration for tail function
 	conf := tail.Config{
-		Follow:    follow,
-		MustExist: false, // If file doesn't exist keep trying
-		Poll:      true,  // Poll instead of using inotify -- inotify may not work on all filesystems
-		Logger:    tail.DiscardingLogger,
+		Follow:      follow,
+		MustExist:   false, // If file doesn't exist keep trying
+		Poll:        true,  // Poll instead of using inotify -- inotify may not work on all filesystems
+		MaxLineSize: 1024 * 1024, // 1MB max line size (well below 10MB bucket capacity)
+		Logger:      tail.DiscardingLogger,
 	}
 
 	// Only set ReOpen to true if we are following the file
