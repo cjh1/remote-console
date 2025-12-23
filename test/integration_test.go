@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/pem"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -37,7 +37,7 @@ const (
 	defaultAuthConfig  = "ADMIN:ADMIN:Administrator;operator:operator_password:Operator;guest:guest_password:ReadOnly"
 )
 
-func uniqueMessage(prefix string) string {
+func makeUnique(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
 
@@ -66,7 +66,7 @@ func (s *IntegrationTestSuite) generateTempSSHKeyPair() (string, string, error) 
 	if err := os.Chmod(keyPath, 0600); err != nil {
 		return "", "", fmt.Errorf("chmod private key: %w", err)
 	}
-	
+
 	// Write properly formatted SSH private key
 	if err := pem.Encode(privFile, privPEM); err != nil {
 		return "", "", fmt.Errorf("write private key: %w", err)

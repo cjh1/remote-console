@@ -138,7 +138,7 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveTail() {
 				"Expected hostname command output in console output; got %q", hostnameOutput)
 			s.T().Logf("Received hostname from console %s: %s", console.name, hostnameOutput)
 
-			msg := uniqueMessage("interactive-tail-" + console.name)
+			msg := makeUnique("interactive-tail" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
@@ -271,43 +271,10 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveInvalidNode() {
 		Path:   fmt.Sprintf("/remote-console/consoles/%s", invalidNodeID),
 	}
 
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-
-	_, resp, err := dialer.DialContext(context.Background(), wsURL.String(), nil)
+	_, resp, err := s.dialWebSocket(wsURL)
 
 	// Should get an error because the WebSocket upgrade should fail with 404
 	s.Require().Error(err, "Expected error when connecting to invalid node")
-
-	if resp != nil {
-		defer resp.Body.Close()
-		s.Require().Equal(http.StatusNotFound, resp.StatusCode,
-			"Expected 404 Not Found for invalid node")
-		s.T().Logf("Got expected 404 status for invalid node %s", invalidNodeID)
-	}
-}
-
-func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
-	parsedURL, err := url.Parse(s.apiURL)
-	s.Require().NoError(err, "Failed to parse API URL")
-
-	// Try to tail a non-existent node
-	invalidNodeID := "x9c9s9b9"
-	wsURL := url.URL{
-		Scheme: "ws",
-		Host:   parsedURL.Host,
-		Path:   fmt.Sprintf("/remote-console/consoles/%s/tail", invalidNodeID),
-	}
-
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-
-	_, resp, err := dialer.DialContext(context.Background(), wsURL.String(), nil)
-
-	// Should get an error because the WebSocket upgrade should fail with 404
-	s.Require().Error(err, "Expected error when tailing invalid node")
 
 	if resp != nil {
 		defer resp.Body.Close()

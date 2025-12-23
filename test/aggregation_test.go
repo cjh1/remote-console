@@ -90,7 +90,7 @@ func (s *IntegrationTestSuite) TestLogAggregation() {
 			s.Require().NoError(err, "Expected console readiness marker")
 		}
 
-		msg := uniqueMessage("log-agg-" + console.name)
+		msg := makeUnique("log-agg" + console.name)
 		exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 		s.Require().NoError(err)
 		s.T().Logf("Sent aggregation message to %s (exit code %d): %s", console.name, exitCode, output)

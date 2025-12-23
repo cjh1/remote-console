@@ -2,6 +2,8 @@ package test
 
 import (
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -25,7 +27,7 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 
 			// Send a message to the console and verify it's seen in the tail
 			wsURL, err := s.tailWebSocketURL(console.nodeID, "")
-			msg := uniqueMessage("tail-basic-" + console.name)
+			msg := makeUnique("tail-basic" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
 			s.T().Logf("%s console echo to pts (exit code %d): %s", console.name, exitCode, output)
@@ -61,7 +63,7 @@ func (s *IntegrationTestSuite) TestConsoleTailFollow() {
 				s.Require().NoError(err, "Expected console readiness marker for %s", console.name)
 			}
 
-			testMsg := uniqueMessage("tail-follow-" + console.name)
+			testMsg := makeUnique("tail-follow" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, testMsg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
@@ -96,7 +98,7 @@ func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
 				s.Require().NoError(err, "second follow connection did not see initial marker")
 			}
 
-			msg := uniqueMessage("tail-concurrent-" + console.name)
+			msg := makeUnique("tail-concurrent" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
@@ -136,7 +138,7 @@ func (s *IntegrationTestSuite) TestConsoleTailHistoryFollowConcurrent() {
 				s.Require().NoError(err, "follow-only connection did not see initial marker")
 			}
 
-			msg := uniqueMessage("tail-history-follow-" + console.name)
+			msg := makeUnique("tail-history-follow" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
@@ -167,7 +169,7 @@ func (s *IntegrationTestSuite) TestConsoleTailLines() {
 				s.Require().NoError(err, "Expected console readiness marker for %s", console.name)
 			}
 
-			msg := uniqueMessage("tail-lines-" + console.name)
+			msg := makeUnique("tail-lines" + console.name)
 
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
@@ -206,7 +208,7 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 				s.Require().NoError(err, "Expected console readiness marker for %s", console.name)
 			}
 
-			msg := uniqueMessage("tail-lines-initial-" + console.name)
+			msg := makeUnique("tail-lines-initial" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
@@ -230,7 +232,7 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			s.Require().Len(strings.Split(strings.TrimSpace(tailOutput), "\n"), 2, "Expected exactly two lines from tail with lines=2")
 			s.Require().Contains(tailOutput, msg, "Test message not found in console output")
 
-			followMsg := uniqueMessage("tail-lines-follow-" + console.name)
+			followMsg := makeUnique("tail-lines-follow" + console.name)
 			exitCode, output, err = s.broadcastConsoleMessage(console, followMsg)
 			s.Require().NoError(err)
 			s.T().Logf("Sent follow-up message to %s console (exit code %d): %s", console.name, exitCode, output)
@@ -238,5 +240,29 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			_, err = s.readWebSocketUntil(followLinesConn, followMsg, 200*time.Second)
 			s.Require().NoError(err, fmt.Sprintf("Expected to find '%s' in live console output", followMsg))
 		})
+	}
+}
+
+func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err, "Failed to parse API URL")
+
+	// Try to tail a non-existent node
+	invalidNodeID := "x9c9s9b9"
+	wsURL := url.URL{
+		Scheme: "ws",
+		Host:   parsedURL.Host,
+		Path:   fmt.Sprintf("/remote-console/consoles/%s/tail", invalidNodeID),
+	}
+	_, resp, err := s.dialWebSocket(wsURL)
+
+	// Should get an error because the WebSocket upgrade should fail with 404
+	s.Require().Error(err, "Expected error when tailing invalid node")
+
+	if resp != nil {
+		defer resp.Body.Close()
+		s.Require().Equal(http.StatusNotFound, resp.StatusCode,
+			"Expected 404 Not Found for invalid node")
+		s.T().Logf("Got expected 404 status for invalid node %s", invalidNodeID)
 	}
 }

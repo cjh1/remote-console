@@ -96,7 +96,7 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	}
 
 	// Send messages before rotation to generate log content
-	preRotateMsg := uniqueMessage("pre-rotation")
+	preRotateMsg := makeUnique("pre-rotation")
 	exitCode, output, err := s.broadcastConsoleMessage(console, preRotateMsg)
 	s.Require().NoError(err)
 	s.T().Logf("Sent pre-rotation message (exit code %d): %s", exitCode, output)
@@ -112,7 +112,7 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	// With RCS_CONSOLE_LOGS_FILE_SIZE=2K, we need to write more than 2KB
 	largeData := strings.Repeat("A", 512) // 512 bytes per message
 	for i := 0; i < 8; i++ {              // 8 * 512 = 4KB, enough to exceed 2KB threshold
-		msg := fmt.Sprintf("%s-bulk-%d", uniqueMessage("rotation-trigger"), i)
+		msg := fmt.Sprintf("%s-bulk-%d", makeUnique("rotation-trigger"), i)
 		exitCode, _, err := s.broadcastConsoleMessage(console, msg+" "+largeData)
 		s.Require().NoError(err)
 		s.T().Logf("Sent bulk message %d (exit code %d)", i, exitCode)
@@ -146,7 +146,7 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 		"Should find rotated log file console.%s.1 in /tmp/conman.old/", console.nodeID)
 
 	// Send a message after rotation to verify tail still works
-	postRotateMsg := uniqueMessage("post-rotation")
+	postRotateMsg := makeUnique("post-rotation")
 	exitCode, output, err = s.broadcastConsoleMessage(console, postRotateMsg)
 	s.Require().NoError(err)
 	s.T().Logf("Sent post-rotation message (exit code %d): %s", exitCode, output)
