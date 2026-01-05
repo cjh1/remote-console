@@ -133,6 +133,10 @@ func parseTimestamp(config LogConfig, consoleLogsPath string, conAggLogFile stri
 		timeStampStr = line[posQ2+2:]
 		isCon = true
 	} else {
+		if conAggLogFile == "" {
+			return nodeName, fd, isCon, isAgg
+		}
+
 		pos = strings.Index(line, conAggLogFile)
 		if pos == -1 {
 			return nodeName, fd, isCon, isAgg
@@ -239,7 +243,7 @@ func (ls *logsService) rotateLogsOnce(config LogConfig, consoleLogsPath string, 
 	}
 	slog.Info("Log rotation completed", "exitCode", exitCode)
 
-	if conChanged, aggChanged = readLogRotTimestamps(config, consoleLogsPath, "", fileStamp); aggChanged {
+	if conChanged, aggChanged = readLogRotTimestamps(config, consoleLogsPath, ls.conAggLogFile, fileStamp); aggChanged {
 		time.Sleep(5 * time.Second)
 
 		if aggChanged {

@@ -203,6 +203,41 @@ func TestRotateLogsOnce(t *testing.T) {
 	require.True(t, found2, "console.x0c0s1b1.1 should be in backup directory")
 }
 
+func TestReadLogRotTimestampsWithAggregationEntry(t *testing.T) {
+	// Prepare a temporary log rotation timestamp file containing an aggregation entry
+	tempDir := t.TempDir()
+	logRotTimestampsFile := filepath.Join(tempDir, "logrot.timestamps")
+
+	consoleTimestamp := time.Date(2023, 11, 14, 12, 26, 40, 0, time.Local)
+	aggTimestamp := time.Date(2023, 11, 15, 8, 30, 0, 0, time.Local)
+
+	content := fmt.Sprintf(`# Log rotation timestamps
+"/var/log/conman/console.x0c0s1b0" %s
+"/tmp/consoleAgg-test.log" %s
+`, consoleTimestamp.Format("2006-01-02-15:04:05"), aggTimestamp.Format("2006-01-02-15:04:05"))
+
+	config := DefaultLogConfig()
+	config.LogRotateStateFilePath = logRotTimestampsFile
+	config.LogRotateFilePath = filepath.Join(tempDir, "logrotate.test")
+
+	err := os.WriteFile(logRotTimestampsFile, []byte(content), 0600)
+	require.NoError(t, err)
+
+	fileStamp := make(map[string]time.Time)
+	aggPath := "/tmp/consoleAgg-test.log"
+
+	conChanged, aggChanged := readLogRotTimestamps(config, "/var/log/conman", aggPath, fileStamp)
+
+	require.True(t, conChanged, "Console logs should show changes")
+	require.True(t, aggChanged, "Aggregation log should show changes")
+
+	expected := map[string]time.Time{
+		"x0c0s1b0":       consoleTimestamp,
+		"consoleAgg.log": aggTimestamp,
+	}
+	require.Equal(t, expected, fileStamp, "Timestamps should match expected values including aggregation log")
+}
+
 func TestReadLogRotTimestampsNoEntries(t *testing.T) {
 	// Prepare a temporary log rotation timestamp file with no entries
 	tempDir := t.TempDir()
