@@ -29,10 +29,13 @@ package utils
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
 type ErrResponse struct {
@@ -63,20 +66,24 @@ func SendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 	}
 }
 
-func PostURL(URL string, requestBody []byte, requestHeaders map[string]string) ([]byte, int, error) {
-	var err error = nil
-	req, err := http.NewRequest("POST", URL, bytes.NewReader(requestBody))
+const defaultHTTPTimeout = 15 * time.Second
+
+func PostURL(ctx context.Context, URL string, requestBody []byte, requestHeaders map[string]string) ([]byte, int, error) {
+	if ctx == nil {
+		return nil, -1, fmt.Errorf("nil context")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", URL, bytes.NewReader(requestBody))
 	if err != nil {
 		slog.Error("Error creating new request", "url", URL, "error", err)
 		return nil, -1, err
 	}
 	req.Header.Add("Content-Type", "application/json")
-	if requestHeaders != nil {
-		for k, v := range requestHeaders {
-			req.Header.Add(k, v)
-		}
+	for k, v := range requestHeaders {
+		req.Header.Add(k, v)
 	}
-	client := &http.Client{}
+
+	client := &http.Client{Timeout: defaultHTTPTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
@@ -95,19 +102,21 @@ func PostURL(URL string, requestBody []byte, requestHeaders map[string]string) (
 	return data, resp.StatusCode, err
 }
 
-func GetURL(URL string, requestHeaders map[string]string) ([]byte, int, error) {
-	var err error = nil
-	req, err := http.NewRequest("GET", URL, nil)
+func GetURL(ctx context.Context, URL string, requestHeaders map[string]string) ([]byte, int, error) {
+	if ctx == nil {
+		return nil, -1, fmt.Errorf("nil context")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", URL, nil)
 	if err != nil {
 		slog.Error("Error creating new request", "url", URL, "error", err)
 		return nil, -1, err
 	}
-	if requestHeaders != nil {
-		for k, v := range requestHeaders {
-			req.Header.Add(k, v)
-		}
+	for k, v := range requestHeaders {
+		req.Header.Add(k, v)
 	}
-	client := &http.Client{}
+
+	client := &http.Client{Timeout: defaultHTTPTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		if resp != nil && resp.Body != nil {

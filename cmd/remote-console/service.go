@@ -61,7 +61,7 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, conma
 			slog.Info("Exiting node watch loop due to shutdown")
 			return
 		case <-ticker.C:
-			changed := nodes.CheckForUpdates(config.SmdURL)
+			changed := nodes.CheckForUpdates(ctx, config.SmdURL)
 
 			if changed {
 				slog.Info("Node changes detected, signaling conman to restart")

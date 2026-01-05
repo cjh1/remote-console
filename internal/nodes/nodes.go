@@ -27,6 +27,7 @@
 package nodes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -141,12 +142,12 @@ func (sc stateComponent) String() string {
 }
 
 // getComponentEndpoints queries HSM for the component endpoints
-func getComponentEndpoints(smdURL string) ([]componentEndpoint, error) {
+func getComponentEndpoints(ctx context.Context, smdURL string) ([]componentEndpoint, error) {
 	var response componentEndpoints
 
 	// Query hsm to get the component endpoints
 	URL := smdURL + "hsm/v2/Inventory/ComponentEndpoints"
-	data, _, err := utils.GetURL(URL, nil)
+	data, _, err := utils.GetURL(ctx, URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get component endpoints from hsm: %w", err)
 	}
@@ -228,11 +229,11 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 }
 
 // GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
-func currentNodesFromSMD(smdURL string) (nodes []NodeConsoleInfo, err error) {
+func currentNodesFromSMD(ctx context.Context, smdURL string) (nodes []NodeConsoleInfo, err error) {
 
 	slog.Info("Starting to get current nodes on the system")
 
-	endpoints, err := getComponentEndpoints(smdURL)
+	endpoints, err := getComponentEndpoints(ctx, smdURL)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get component endpoints: %w", err)
 	}
@@ -314,14 +315,14 @@ func updateNodes(nodes []NodeConsoleInfo) bool {
 	return changed
 }
 
-func CheckForUpdates(smdURL string) bool {
+func CheckForUpdates(ctx context.Context, smdURL string) bool {
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
 
 	slog.Info("Getting current nodes from HSM")
 	// keep track of if we need to redo the configuration
 	changed := false
 
-	fetched_nodes, err := currentNodesFromSMD(smdURL)
+	fetched_nodes, err := currentNodesFromSMD(ctx, smdURL)
 	if err != nil {
 		slog.Error("Error getting current nodes from SMD", "error", err)
 		return false
@@ -338,7 +339,7 @@ func CheckForUpdates(smdURL string) bool {
 
 func CurrentNodes() map[string]*NodeConsoleInfo {
 	currNodesMutex.Lock()
-	
+
 	defer currNodesMutex.Unlock()
 
 	// create a copy of the current nodes to return
