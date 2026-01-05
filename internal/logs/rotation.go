@@ -49,7 +49,7 @@ func (ls *logsService) initLogRotate() error {
 	slog.Info("Ensuring console log backup directory present", "path", ls.config.ConsoleLogsBackupPath)
 	err := os.MkdirAll(ls.config.ConsoleLogsBackupPath, 0755)
 	if err != nil {
-		return fmt.Errorf("error ensuring console logs backup directory: %v", err)
+		return fmt.Errorf("error ensuring console logs backup directory: %w", err)
 	}
 
 	return nil

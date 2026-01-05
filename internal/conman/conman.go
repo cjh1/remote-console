@@ -74,7 +74,7 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 
 	bs, err := generateBaseConfig(cs.config)
 	if err != nil {
-		return false, fmt.Errorf("Unable to template base config file: %v", err)
+		return false, fmt.Errorf("Unable to template base config file: %w", err)
 	}
 
 	if !forceUpdate && !willUpdateConfig(bs) {
@@ -85,13 +85,13 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 	slog.Debug("Opening conman configuration file for output", "path", cs.config.ConfFilePath)
 	cf, err := os.OpenFile(cs.config.ConfFilePath, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return false, fmt.Errorf("Unable to open config file to write: %v", err)
+		return false, fmt.Errorf("Unable to open config file to write: %w", err)
 	}
 	defer cf.Close()
 
 	_, err = cf.Write(bs)
 	if err != nil {
-		return false, fmt.Errorf("Unable to write base config into file: %v", err)
+		return false, fmt.Errorf("Unable to write base config into file: %w", err)
 	}
 
 	slog.Info("Populating conman configuration with nodes", "nodeCount", len(nodeMap))
@@ -138,7 +138,7 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 	sort.Strings(consoles)
 	for _, output := range consoles {
 		if _, err = cf.WriteString(output); err != nil {
-			return false, fmt.Errorf("Unable to write console entry into file: %v", err)
+			return false, fmt.Errorf("Unable to write console entry into file: %w", err)
 		}
 	}
 

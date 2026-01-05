@@ -167,23 +167,23 @@ func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 
 	ss, err := createSecureStorage(cs.config)
 	if err != nil {
-		return false, fmt.Errorf("unable to create secure storage adapter: %v", err)
+		return false, fmt.Errorf("unable to create secure storage adapter: %w", err)
 	}
 	var consoleKeys sshKeys
 	err = ss.Lookup(cs.config.SecureStorageSshKeysPath, &consoleKeys)
 	if err != nil {
-		return false, fmt.Errorf("unable to lookup private key: %v", err)
+		return false, fmt.Errorf("unable to lookup private key: %w", err)
 	}
 
 	newHash, err := HashString(consoleKeys.PrivateKey)
 	if err != nil {
-		return false, fmt.Errorf("failed to hash the private ssh key received from Vault. %v", err)
+		return false, fmt.Errorf("failed to hash the private ssh key received from Vault. %w", err)
 	} else if cs.previousPrivateKeyHash == nil || !(bytes.Equal(newHash, cs.previousPrivateKeyHash)) {
 		retVal = true
 		cs.previousPrivateKeyHash = newHash
 		err = os.WriteFile(cs.config.SshConsoleKeyPath, []byte(consoleKeys.PrivateKey), 0600)
 		if err != nil {
-			return false, fmt.Errorf("failed to write our the private ssh key received from Vault. Err: %v", err)
+			return false, fmt.Errorf("failed to write our the private ssh key received from Vault. Err: %w", err)
 		}
 		log.Printf("Console ssh key file created")
 	} else {
@@ -200,7 +200,7 @@ func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 			sshConsoleCertPath := cs.config.SshConsoleKeyPath + "-cert.pub"
 			err = os.WriteFile(sshConsoleCertPath, []byte(*consoleKeys.Certificate), 0644)
 			if err != nil {
-				return false, fmt.Errorf("failed to write our the public ssh cert %v", err)
+				return false, fmt.Errorf("failed to write our the public ssh cert %w", err)
 			}
 			log.Printf("Console ssh cert file created")
 		} else {
