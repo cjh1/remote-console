@@ -31,7 +31,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -58,7 +58,7 @@ func SendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 	w.WriteHeader(sc)
 	err := json.NewEncoder(w).Encode(data)
 	if err != nil {
-		log.Printf("Error: encoding/sending JSON response: %s\n", err)
+		slog.Error("encoding/sending JSON response", "error", err)
 		return
 	}
 }
@@ -67,7 +67,7 @@ func PostURL(URL string, requestBody []byte, requestHeaders map[string]string) (
 	var err error = nil
 	req, err := http.NewRequest("POST", URL, bytes.NewReader(requestBody))
 	if err != nil {
-		log.Printf("postURL Error creating new request to %s: %s", URL, err)
+		slog.Error("Error creating new request", "url", URL, "error", err)
 		return nil, -1, err
 	}
 	req.Header.Add("Content-Type", "application/json")
@@ -83,13 +83,13 @@ func PostURL(URL string, requestBody []byte, requestHeaders map[string]string) (
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
-		log.Printf("postURL Error on request to %s: %s", URL, err)
+		slog.Error("Error on request", "url", URL, "error", err)
 		return nil, -1, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("postURL Error reading response: %s", err)
+		slog.Error("Error reading response", "error", err)
 		return nil, resp.StatusCode, err
 	}
 	return data, resp.StatusCode, err
@@ -99,7 +99,7 @@ func GetURL(URL string, requestHeaders map[string]string) ([]byte, int, error) {
 	var err error = nil
 	req, err := http.NewRequest("GET", URL, nil)
 	if err != nil {
-		log.Printf("getURL Error creating new request to %s: %s", URL, err)
+		slog.Error("Error creating new request", "url", URL, "error", err)
 		return nil, -1, err
 	}
 	if requestHeaders != nil {
@@ -114,13 +114,13 @@ func GetURL(URL string, requestHeaders map[string]string) ([]byte, int, error) {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 		}
-		log.Printf("getURL Error on request to %s: %s", URL, err)
+		slog.Error("Error on request", "url", URL, "error", err)
 		return nil, -1, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Error reading response: %s", err)
+		slog.Error("Error reading response", "error", err)
 		return nil, resp.StatusCode, err
 	}
 	return data, resp.StatusCode, err

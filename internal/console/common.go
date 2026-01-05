@@ -3,7 +3,7 @@ package console
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -29,7 +29,7 @@ func drainAndCloseRequestBody(req *http.Request) {
 func validateNode(id string) bool {
 	// make sure this is a valid node
 	if !nodes.IsCurrentNode(id) {
-		log.Printf("%s is not a valid node.", id)
+		slog.Error("Invalid node ID", "nodeID", id)
 		return false
 	}
 	return true
@@ -38,7 +38,7 @@ func validateNode(id string) bool {
 func extractNodeId(w http.ResponseWriter, r *http.Request) (string, error) {
 	nodeID := chi.URLParam(r, "nodeID")
 	if nodeID == "" {
-		log.Printf("There was an error reading the node ID from the request %s", r.URL.Path)
+		slog.Error("Failed to extract node ID from request", "path", r.URL.Path)
 		return "", fmt.Errorf("Unable to extract Node ID")
 	}
 

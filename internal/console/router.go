@@ -26,7 +26,7 @@ package console
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -40,7 +40,7 @@ func sendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 	if data != nil {
 		err := json.NewEncoder(w).Encode(data)
 		if err != nil {
-			log.Printf("Error: encoding/sending JSON response: %s\n", err)
+			slog.Error("Failed to encode JSON response", "error", err)
 			return
 		}
 	}

@@ -30,7 +30,7 @@ import (
 	"fmt"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/OpenCHAMI/remote-console/internal/utils"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -65,7 +65,7 @@ func doHealth(w http.ResponseWriter, r *http.Request) {
 	stats := getCurrentHealth()
 
 	// log the query
-	log.Printf("Health check: %s", stats)
+	slog.Debug("Health check", "consoles", stats.NumberConsoles, "lastUpdate", stats.LastHardwareUpdate)
 
 	// write the output
 	utils.SendResponseJSON(w, http.StatusOK, stats)

@@ -28,7 +28,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -79,32 +79,32 @@ func (cs *credsService) GetPasswordsWithRetries(bmcXNames []string, maxTries, wa
 	var passwords map[string]compcreds.CompCredentials = nil
 	var err error = nil
 	for numTries := 0; numTries < maxTries; numTries++ {
-		log.Printf("Get passwords with retry: %d", numTries)
+		slog.Debug("Get passwords with retry", "attempt", numTries)
 		passwords, err = getPasswords(cs.config, bmcXNames)
 
-		log.Printf("Passwords: %#v", passwords)
+		slog.Debug("Passwords retrieved", "count", len(passwords))
 
 		if err != nil {
-			log.Printf("Error retrieving passwords: %v", err)
+			slog.Error("Error retrieving passwords", "error", err)
 		}
 
 		foundAll := true
 		for _, nn := range bmcXNames {
 			_, ok := passwords[nn]
 			if !ok {
-				log.Printf("Missing credentials for %s", nn)
+				slog.Warn("Missing credentials for", "xname", nn)
 				foundAll = false
 			}
 		}
 		if foundAll {
-			log.Printf("Retrieved all passwords")
+			slog.Info("Retrieved all passwords")
 			break
 		}
-		log.Printf("Attempt %d - Only retrieved %d of %d creds from vault, waiting and trying again...",
-			numTries, len(passwords), len(bmcXNames))
+		slog.Warn("Only retrieved subset of creds from vault, waiting and trying again",
+			"attempt", numTries, "retrieved", len(passwords), "total", len(bmcXNames))
 		time.Sleep(time.Duration(waitSecs) * time.Second)
 	}
-	log.Printf("Maximum password attempts reached, configuring conman with what we have.")
+	slog.Warn("Maximum password attempts reached, configuring conman with what we have")
 
 	cs.previousPasswords = passwords
 
@@ -185,15 +185,15 @@ func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("failed to write our the private ssh key received from Vault. Err: %w", err)
 		}
-		log.Printf("Console ssh key file created")
+		slog.Info("Console ssh key file created")
 	} else {
-		log.Printf("Console ssh key file already exists")
+		slog.Warn("Console ssh cert file already exists")
 	}
 
 	if consoleKeys.Certificate != nil {
 		newHash, err = HashString(*consoleKeys.Certificate)
 		if err != nil {
-			log.Printf("Error: Failed to hash the public ssh cert received from Vault. Err: %s", err)
+			slog.Error("Failed to hash the public ssh cert received from Vault", "error", err)
 		} else if cs.previousCertHash == nil || !(bytes.Equal(newHash, cs.previousCertHash)) {
 			retVal = true
 			cs.previousCertHash = newHash
@@ -202,9 +202,9 @@ func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 			if err != nil {
 				return false, fmt.Errorf("failed to write our the public ssh cert %w", err)
 			}
-			log.Printf("Console ssh cert file created")
+			slog.Info("Console ssh cert file created")
 		} else {
-			log.Printf("Console ssh cert file already exists")
+			slog.Warn("Console ssh cert file already exists")
 		}
 	}
 

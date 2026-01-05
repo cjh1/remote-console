@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -38,7 +38,7 @@ type interactiveConsoleSession struct {
 // Close performs graceful shutdown of the console session
 // This method is idempotent and safe to call multiple times
 func (s *interactiveConsoleSession) Close() {
-	log.Printf("Starting close for console session: %s", s.nodeID)
+	slog.Info("Starting close for console session", "nodeID", s.nodeID)
 
 	// Cancel context to signal all goroutines to stop (idempotent)
 	s.cancel()
@@ -49,7 +49,7 @@ func (s *interactiveConsoleSession) Close() {
 	s.ptmxMutex.RUnlock()
 	
 	if ptmx != nil {
-		log.Printf("Sending ConMan escape sequence (&.) to disconnect from console: %s", s.nodeID)
+		slog.Info("Sending ConMan escape sequence (&.) to disconnect from console", "nodeID", s.nodeID)
 		// Ignore write errors - PTY might already be closed
 		ptmx.Write([]byte("&."))
 		time.Sleep(100 * time.Millisecond) // Brief pause to let it process
@@ -57,7 +57,7 @@ func (s *interactiveConsoleSession) Close() {
 
 	// Signal process termination (idempotent - safe to signal multiple times)
 	if s.cmd != nil && s.cmd.Process != nil {
-		log.Printf("Sending SIGTERM to conman process for console: %s", s.nodeID)
+		slog.Info("Sending SIGTERM to conman process for console", "nodeID", s.nodeID)
 		// Ignore signal errors - process might already be dead
 		s.cmd.Process.Signal(syscall.SIGTERM)
 	}
@@ -74,7 +74,7 @@ func (s *interactiveConsoleSession) Close() {
 	// Close WebSocket - already handles multiple closes internally
 	s.ws.Close()
 
-	log.Printf("Close completed for console session: %s", s.nodeID)
+	slog.Info("Close completed for console session", "nodeID", s.nodeID)
 }
 
 // monitorProcess watches for process exit and attempts reconnection if node still exists
@@ -82,24 +82,24 @@ func (s *interactiveConsoleSession) Close() {
 func (s *interactiveConsoleSession) monitorProcess() {
 	for {
 		<-s.processExited
-		log.Printf("Conman process exited for console: %s", s.nodeID)
+		slog.Info("Conman process exited for console", "nodeID", s.nodeID)
 		
 		// Check if session is closing
 		select {
 		case <-s.ctx.Done():
-			log.Printf("Session closing, stopping monitor for console: %s", s.nodeID)
+			slog.Info("Session closing, stopping monitor for console", "nodeID", s.nodeID)
 			return
 		default:
 		}
 			
 		// Check if the node still exists (might have been updated/changed)
 		if !validateNode(s.nodeID) {
-			log.Printf("Node %s no longer exists, closing session", s.nodeID)
+			slog.Info("Node no longer exists, closing session", "nodeID", s.nodeID)
 			s.Close()
 			return
 		}
 		
-		log.Printf("Node %s still exists, attempting to reconnect...", s.nodeID)
+		slog.Info("Node still exists, attempting to reconnect", "nodeID", s.nodeID)
 		if !s.reconnect() {
 			// Reconnection failed or was cancelled
 			return
@@ -167,7 +167,7 @@ func (s *interactiveConsoleSession) reconnect() bool {
 	// Check if context is already cancelled
 	select {
 	case <-s.ctx.Done():
-		log.Printf("Context cancelled before reconnection for %s: %v", s.nodeID, s.ctx.Err())
+		slog.Info("Context cancelled before reconnection", "nodeID", s.nodeID, "error", s.ctx.Err())
 		s.Close()
 		return false
 	default:
@@ -177,7 +177,7 @@ func (s *interactiveConsoleSession) reconnect() bool {
 	reconnectMsg := fmt.Sprintf("\n[Reconnecting to %s...]\n", s.nodeID)
 	err := s.ws.Write(websocket.TextMessage, []byte(reconnectMsg))
 	if err != nil {
-		log.Printf("Failed to send reconnect message: %v", err)
+		slog.Warn("Failed to send reconnect message", "nodeID", s.nodeID, "error", err)
 		s.Close()
 		return false
 	}
@@ -196,16 +196,16 @@ func (s *interactiveConsoleSession) reconnect() bool {
 	
 	for {
 		attempt++
-		log.Printf("Attempting to reconnect conman for %s (attempt %d)", s.nodeID, attempt)
+		slog.Info("Attempting to reconnect conman", "nodeID", s.nodeID, "attempt", attempt)
 		
 		if err := s.startConmanProcess(); err == nil {
 			// Success!
-			log.Printf("Successfully reconnected conman for console: %s", s.nodeID)
+			slog.Info("Successfully reconnected conman for console", "nodeID", s.nodeID)
 			
 			// Check if we are closed (double-check right before starting goroutine)
 			select {
 			case <-s.ctx.Done():
-				log.Printf("Context cancelled after reconnection for %s: %v", s.nodeID, s.ctx.Err())
+				slog.Info("Context cancelled after reconnection", "nodeID", s.nodeID, "error", s.ctx.Err())
 				s.Close()
 				return false
 			default:
@@ -221,23 +221,23 @@ func (s *interactiveConsoleSession) reconnect() bool {
 			// Return true - monitorProcess will continue monitoring this new process
 			return true
 		} else {
-			log.Printf("Failed to start conman (attempt %d): %v", attempt, err)
+			slog.Warn("Failed to start conman", "nodeID", s.nodeID, "attempt", attempt, "error", err)
 		}
 		
 		// Wait before retry, checking for timeout
 		select {
 		case <-timeout:
-			log.Printf("Reconnection timeout after %d attempts for %s", attempt, s.nodeID)
+			slog.Warn("Reconnection timeout", "nodeID", s.nodeID, "attempts", attempt)
 			errorMsg := fmt.Sprintf("\r\n[Reconnection failed after %d attempts]\r\n", attempt)
 			err := s.ws.Write(websocket.TextMessage, []byte(errorMsg))
 			if err != nil {
-				log.Printf("Failed to send reconnection failure message: %v", err)
+				slog.Warn("Failed to send reconnection failure message", "nodeID", s.nodeID, "error", err)
 			}
 			
 			s.Close()
 			return false
 		case <-s.ctx.Done():
-			log.Printf("Session closed during reconnection for %s: %v", s.nodeID, s.ctx.Err())
+			slog.Info("Session closed during reconnection", "nodeID", s.nodeID, "error", s.ctx.Err())
 			s.Close()
 			return false
 		// Wait before next retry
@@ -266,7 +266,7 @@ func (s *interactiveConsoleSession) streamOutput() {
 	// Check if session is closing before starting
 	select {
 	case <-s.ctx.Done():
-		log.Printf("Session closing, streamOutput exiting for console: %s: %v", s.nodeID, s.ctx.Err())
+		slog.Debug("Session closing, streamOutput exiting for console", "nodeID", s.nodeID, "error", s.ctx.Err())
 		return
 	default:
 	}
@@ -278,7 +278,7 @@ func (s *interactiveConsoleSession) streamOutput() {
 		s.ptmxMutex.RUnlock()
 		
 		if ptmx == nil {
-			log.Printf("PTY is nil, exiting streamOutput for console: %s", s.nodeID)
+			slog.Debug("PTY is nil, exiting streamOutput for console", "nodeID", s.nodeID)
 			return
 		}
 		
@@ -286,19 +286,19 @@ func (s *interactiveConsoleSession) streamOutput() {
 		if err != nil {
 			// Don't log I/O errors - they're expected when the process is killed
 			if err != io.EOF && !isEIO(err) {
-				log.Printf("Error reading from PTY: %v", err)
+				slog.Error("Error reading from PTY", "nodeID", s.nodeID, "error", err)
 			}
 			// PTY closed, exit gracefully without calling close() (close() already closed PTY)
 			return
 		}
 
 		if n > 0 {
-			log.Printf("console %s PTY read (%d bytes): %q", s.nodeID, n, string(buf[:n]))
+			slog.Debug("PTY read", "nodeID", s.nodeID, "bytes", n, "data", string(buf[:n]))
 			
 			// Apply rate limiting (convert bytes to KB, rounded up)
 			kb := uint16((n + 1023) / 1024)
 			for !s.rateLimiter.Pour(kb) {
-				log.Printf("Rate limit reached for console %s, waiting for capacity", s.nodeID)
+				slog.Debug("Rate limit reached, waiting for capacity", "nodeID", s.nodeID)
 				time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
 			}
 			
@@ -322,9 +322,9 @@ func (s *interactiveConsoleSession) streamInput() {
 		if err != nil {
 			// Check if it's an unexpected close (not normal, going away, or abnormal)
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket unexpected close error: %v", err)
+				slog.Warn("WebSocket unexpected close error", "nodeID", s.nodeID, "error", err)
 			} else {
-				log.Printf("WebSocket closed normally for console: %s", s.nodeID)
+				slog.Info("WebSocket closed normally for console", "nodeID", s.nodeID)
 			}
 			s.Close()
 			return
@@ -336,7 +336,7 @@ func (s *interactiveConsoleSession) streamInput() {
 			s.ptmxMutex.RLock()
 			if s.ptmx == nil {
 				s.ptmxMutex.RUnlock()
-				log.Printf("PTY is nil, skipping input for console: %s", s.nodeID)
+				slog.Debug("PTY is nil, skipping input for console", "nodeID", s.nodeID)
 				// Check if closing to exit faster
 				select {
 				case <-s.ctx.Done():
@@ -350,7 +350,7 @@ func (s *interactiveConsoleSession) streamInput() {
 			s.ptmxMutex.RUnlock()
 			
 			if err != nil {
-				log.Printf("Failed to write to PTY: %v", err)
+				slog.Error("Failed to write to PTY", "nodeID", s.nodeID, "error", err)
 				s.Close()
 				return
 			}
@@ -389,10 +389,10 @@ func NewInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interact
 
 	// Start conman process with PTY
 	if err := session.startConmanProcess(); err != nil {
-		log.Printf("Failed to start conman with PTY: %v", err)
+		slog.Error("Failed to start conman with PTY", "nodeID", nodeID, "error", err)
 		err = session.ws.Write(websocket.TextMessage, []byte("Error: Failed to start conman with PTY"))
 		if err != nil {
-			log.Printf("Failed to send error message via WebSocket: %v", err)
+			slog.Warn("Failed to send error message via WebSocket", "nodeID", nodeID, "error", err)
 		}
 		session.Close()
 		return nil
@@ -427,7 +427,7 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade WebSocket connection: %v", err)
+		slog.Error("Failed to upgrade WebSocket connection", "nodeID", nodeID, "error", err)
 		// Can't send HTTP error after upgrade attempt
 		return
 	}
@@ -443,10 +443,10 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 
 	defer session.Close() // Ensure cleanup always happens
 
-	log.Printf("Started conman process for console: %s", nodeID)
+	slog.Info("Started conman process for console", "nodeID", nodeID)
 
 	// Start session (blocks until all goroutines complete)
 	session.Start()
 
-	log.Printf("Interactive console session ended for: %s", nodeID)
+	slog.Info("Interactive console session ended", "nodeID", nodeID)
 }

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -44,45 +44,33 @@ func newConsoleTailSession(ctx context.Context, consoleLogsPath string, nodeID s
 func (cts *consoleTailSession) close() {
 	cts.closeOnce.Do(func() {
 		if cts.tail != nil {
-			log.Printf("cleanup tail for %s", cts.nodeID)
-			// Print out the last 10 lines of the file before closing
-			filename := fmt.Sprintf("%s/console.%s", cts.consoleLogsPath, cts.nodeID)
-			lastLines, _, err := readLastNLines(filename, 10)
-			if err != nil {
-				log.Printf("Error reading last lines from console log: %v", err)
-			} else {
-				for _, line := range lastLines {
-					log.Printf("Last line: %s", line)
-				}
-			}
-			// end debug
-
+			slog.Info("Stopping tail for console tail session", "nodeID", cts.nodeID)
 			cts.tail.Config.Poll = false
 			cts.tail.Cleanup()
-			err = cts.tail.Stop()
+			err := cts.tail.Stop()
 			if err != nil {
-				log.Printf("Error stopping tail: %v", err)
+				slog.Error("Error stopping tail", "error", err, "nodeID", cts.nodeID)
 			}
 		}
 
-		log.Printf("Closing console tail session for: %s", cts.nodeID)
+		slog.Info("Closing console tail session", "nodeID", cts.nodeID)
 
 		cts.ws.Close()
 	
-		log.Printf("Close completed for console tail session: %s", cts.nodeID)
+		slog.Info("Close completed for console tail session", "nodeID", cts.nodeID)
 	})
 }
 
 func (cts *consoleTailSession) waitForClientClose() {
-	log.Printf("Waiting for client close on tail session '%s'", cts.nodeID)
+	slog.Debug("Waiting for client close on tail session", "nodeID", cts.nodeID)
 	for {
 		cts.ws.configureReadDeadlines()
 		_, _, err := cts.ws.Read()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket closed normally for tail session '%s'", cts.nodeID)
+				slog.Info("WebSocket closed normally for tail session", "nodeID", cts.nodeID)
 			} else {
-				log.Printf("WebSocket closed for tail session '%s', error: %v", cts.nodeID, err)
+				slog.Warn("WebSocket closed for tail session", "nodeID", cts.nodeID, "error", err)
 			}
 
 			cts.close()
@@ -95,35 +83,30 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 	fmt.Printf("streamConsoleTail called for node: %s, follow=%v\n", cts.nodeID, follow)
 	// Read the lines of the tail output while looking for a cancel signal
 	for line := range cts.tail.Lines {
-		log.Printf("got line: %v", line)
-
 		// Stream the line to the websocket
 		if line == nil {
-			log.Printf("Tailing console for '%s' complete (follow=%v)", cts.nodeID, follow)
+			slog.Info("Tailing console complete", "nodeID", cts.nodeID, "follow", follow)
 
 			cts.tail.Config.Poll = false
 			cts.tail.Cleanup()
 			cts.tail.Stop()
-			log.Printf("Tail loop exiting for '%s' (follow=%v)", cts.nodeID, follow)
+			slog.Info("Tail loop exiting", "nodeID", cts.nodeID, "follow", follow)
 			return
 		}
 
 		// Add newline back (tail library strips it)
 		lineText := line.Text + "\n"
-		log.Printf("before write")
-		log.Printf("Sending line:  follow: %v, %s", follow, lineText)
-		
+	
 		// Apply rate limiting (convert bytes to KB, rounded up)
 		kb := uint16((len(lineText) + 1023) / 1024)
 		for !cts.rateLimiter.Pour(kb) {
-			log.Printf("Rate limit reached for tail %s, waiting for capacity", cts.nodeID)
+			slog.Debug("Rate limit reached for tail, waiting for capacity", "nodeID", cts.nodeID)
 			time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
 		}
 		
 		err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
-		log.Printf("after write")
 		if err != nil {
-			log.Printf("Failed to write message to websocket: %s", err)
+			slog.Error("Failed to write message to websocket", "error", err, "nodeID", cts.nodeID)
 			cts.close()
 			cts.tail.Config.Poll = false
 			cts.tail.Cleanup()
@@ -188,34 +171,29 @@ func readLastNLines(filename string, numLines int) ([]string, int64, error) {
 
 func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
-	fmt.Printf("Starting to tail console log for node: %s, follow=%v, numLines=%d\n", cts.nodeID, follow, numLines)
-	log.Printf("Tail session starting for node=%s follow=%v numLines=%d", cts.nodeID, follow, numLines)
+	slog.Info("Tail session starting", "nodeID", cts.nodeID, "follow", follow, "numLines", numLines)
 
 	filename := fmt.Sprintf("%s/console.%s", cts.consoleLogsPath, cts.nodeID)
 
 	var seekOffset int64
 	// If numLines is specified, send last N lines first
 	if numLines > 0 {
-		fmt.Printf("Reading last %d lines from console log: %s\n", numLines, filename)
 		lines, currentPos, err := readLastNLines(filename, numLines)
-		fmt.Printf("Read %d lines from console log\n", len(lines))
-		fmt.Printf("CurrentPos=%d\n", currentPos)
-
+		
 		if err == nil {
 			for _, line := range lines {
-				fmt.Printf("Sending line: follow: %v: %s\n", follow, line)
 				lineText := line + "\n"
 				
 			// Apply rate limiting (convert bytes to KB, rounded up)
 			kb := uint16((len(lineText) + 1023) / 1024)
 				for !cts.rateLimiter.Pour(kb) {
-					log.Printf("Rate limit reached for tail %s (history), waiting for capacity", cts.nodeID)
+					slog.Debug("Rate limit reached for tail (history), waiting for capacity", "nodeID", cts.nodeID)
 					time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
 				}
 				
 				err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
 				if err != nil {
-					log.Printf("Failed to send lines: %v", err)
+					slog.Error("Failed to send lines", "error", err, "nodeID", cts.nodeID)
 					cts.ws.Write(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error sending console log"))
 					cts.close()
@@ -231,23 +209,23 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 				return
 			}
 		} else if errors.Is(err, os.ErrNotExist) {
-			log.Printf("Console log %s not found; no history available (follow=%v)", filename, follow)
+			slog.Warn("Console log not found; no history available", "filename", filename, "follow", follow, "nodeID", cts.nodeID)
 			if !follow {
 				err := cts.ws.Write(websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Console log not available yet"))
 				if err != nil {
-					log.Printf("Failed to send close message: %v", err)
+					slog.Error("Failed to send close message", "error", err, "nodeID", cts.nodeID)
 				}
 				
 				cts.close()
 				return
 			}
 		} else {
-			log.Printf("Failed to read last %d lines from %s: %v", numLines, filename, err)
+			slog.Error("Failed to read last N lines", "numLines", numLines, "filename", filename, "error", err, "nodeID", cts.nodeID)
 			err = cts.ws.Write(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error reading console log"))
 			if err != nil {
-				log.Printf("Failed to send close message: %v", err)
+				slog.Error("Failed to send close message", "error", err, "nodeID", cts.nodeID)
 			}
 			cts.close()
 			return
@@ -281,24 +259,22 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	var err error
 	cts.tail, err = tail.TailFile(filename, conf)
 	if err != nil {
-		log.Printf("Failed to tail file %s with error:%s", filename, err)
+		slog.Error("Failed to tail file", "filename", filename, "error", err, "nodeID", cts.nodeID)
 		err = cts.ws.Write(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console tail session"))
 		if err != nil {
-			log.Printf("Failed to send close message: %v", err)
+			slog.Error("Failed to send close message", "error", err, "nodeID", cts.nodeID)
 		}
 		cts.close()
 		return
 	}
 
-	log.Printf("Tailing console file: %s", filename)
+	slog.Info("Tailing console file", "filename", filename, "nodeID", cts.nodeID)
 
 	cts.streamConsoleTail(follow)
 }
 
 func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
-	log.Printf("doTailConsole called path=%s", r.URL.RequestURI())
-
 	ctx := r.Context()
 
 	// Make sure the request is cleaned up
@@ -317,7 +293,7 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	log.Printf("Tailing console for node: %s", nodeID)
+	slog.Info("Tailing console for node", "nodeID", nodeID)
 
 	// Make sure we are monitoring a valid node
 	if exists := validateNode(nodeID); !exists {
@@ -346,19 +322,17 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	log.Printf("Starting console tail session for node: %s", nodeID)
-	log.Printf("Tail parameters: follow=%s lines=%s", params.Get("follow"), params.Get("lines"))
-
+	slog.Info("Starting console tail session for node", "nodeID", nodeID)
+	
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Error upgrading to WebSocket: %v", err)
+		slog.Error("Error upgrading to WebSocket", "error", err)
 		// Can't send HTTP error after upgrade attempt
 		return
 	}
 
-	log.Printf("WebSocket path: %s", consoleLogsPath)
-	log.Printf("Client %s connected for node %s tail", conn.RemoteAddr(), nodeID)
+	slog.Info("Client connected for node tail", "remoteAddr", conn.RemoteAddr().String(), "nodeID", nodeID)
 
 	// From here on, errors must be sent via WebSocket close frames
 	session := newConsoleTailSession(ctx, consoleLogsPath, nodeID, conn)
@@ -371,10 +345,10 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 
 	go session.waitForClientClose()
 
-	log.Printf("Started tailing console log for: %s", nodeID)
+	slog.Info("Started tailing console log", "nodeID", nodeID)
 
 	// Start streaming the console output
 	session.tailConsole(follow, numLines)
 
-	log.Printf("Console tail session ended for: %s", nodeID)
+	slog.Info("Console tail session ended", "nodeID", nodeID)
 }

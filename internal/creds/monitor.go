@@ -7,7 +7,7 @@ package creds
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
@@ -55,19 +55,19 @@ func (cs *credsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 	currentPasswords, err := getPasswords(cs.config, xnames)
 
 	if err != nil {
-		log.Printf("Error retrieving passwords while checking for credential changes: %v", err)
+		slog.Error("Error retrieving passwords while checking for credential changes", "error", err)
 		return false, err
 	}
 	for _, xname := range xnames {
 		currentCreds, ok := currentPasswords[xname]
 		if !ok {
-			log.Printf("Missing credentials detected for %s while checking for credential changes", xname)
+			slog.Warn("Missing credentials detected while checking for credential changes", "xname", xname)
 			continue
 		}
 		previousCreds, _ := cs.previousPasswords[xname]
 
 		if (currentCreds.Username != previousCreds.Username) || (currentCreds.Password != previousCreds.Password) {
-			log.Printf("Change detected in the passwords.  Conman will be reconfigured.")
+			slog.Info("Change detected in the passwords. Conman will be reconfigured.")
 			return true, nil
 		}
 	}

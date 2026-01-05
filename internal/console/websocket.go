@@ -3,7 +3,7 @@ package console
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -93,7 +93,7 @@ func (ws *webSocketSession) Close() {
 			case msg := <-ws.send:
 				ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
 				if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
-					log.Printf("WebSocket write failed during drain for %s: %v", ws.name, err)
+					slog.Error("WebSocket write failed during drain", "name", ws.name, "error", err)
 				}
 			// No more messages to send, we can close the channel
 			default:
@@ -119,7 +119,7 @@ func (ws *webSocketSession) writePump() {
                 return
             }
             if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
-                log.Printf("WebSocket write failed for %s: %v", ws.name, err)
+                slog.Error("WebSocket write failed", "name", ws.name, "error", err)
                 // Connection broken, close channels immediately (can't drain)
                 ws.closeChannels()
                 ws.handleClose()
@@ -128,7 +128,7 @@ func (ws *webSocketSession) writePump() {
 		case <-ticker.C:
 			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
             if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-                log.Printf("WebSocket ping failed for %s: %v", ws.name, err)
+                slog.Error("WebSocket ping failed", "name", ws.name, "error", err)
                 // Connection broken, close channels immediately (can't drain)
                 ws.closeChannels()
                 ws.handleClose()

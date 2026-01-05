@@ -29,7 +29,7 @@ package nodes
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -188,7 +188,7 @@ func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo
 		}
 
 	case sc.Telnet != nil && sc.Telnet.ServiceEnabled || sc.WebSocket != nil && sc.WebSocket.ServiceEnabled:
-		log.Printf("telnet and websocket not supported")
+		slog.Warn("telnet and websocket not supported", "nodeID", endpoint.ID)
 	}
 
 	return nil
@@ -220,7 +220,7 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 				ConnectionHost: endpoint.RedfishEndpointFQDN,
 			}
 		default:
-			log.Printf("unsupported connection type: %s", ct)
+			slog.Error("unsupported connection type", "type", ct, "nodeID", endpoint.ID)
 		}
 	}
 
@@ -230,7 +230,7 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 // GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
 func currentNodesFromSMD(smdURL string) (nodes []NodeConsoleInfo, err error) {
 
-	log.Printf("Starting to get current nodes on the system")
+	slog.Info("Starting to get current nodes on the system")
 
 	endpoints, err := getComponentEndpoints(smdURL)
 	if err != nil {
@@ -258,7 +258,7 @@ func currentNodesFromSMD(smdURL string) (nodes []NodeConsoleInfo, err error) {
 		}
 	}
 
-	log.Printf("Completed getting current nodes on the system")
+	slog.Info("Completed getting current nodes on the system")
 
 	return nodes, nil
 }
@@ -317,30 +317,28 @@ func updateNodes(nodes []NodeConsoleInfo) bool {
 func CheckForUpdates(smdURL string) bool {
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
 
-	log.Printf("Getting current nodes from HSM")
+	slog.Info("Getting current nodes from HSM")
 	// keep track of if we need to redo the configuration
 	changed := false
 
 	fetched_nodes, err := currentNodesFromSMD(smdURL)
 	if err != nil {
-		log.Printf("Error getting current nodes from SMD: %s", err)
+		slog.Error("Error getting current nodes from SMD", "error", err)
 		return false
 	}
 
-	log.Printf("Fetched %d nodes from SMD", len(fetched_nodes))
+	slog.Info("Fetched nodes from SMD", "count", len(fetched_nodes))
 
 	changed = updateNodes(fetched_nodes)
 
-	log.Printf("Completed getting current nodes from SMD")
+	slog.Info("Completed getting current nodes from SMD")
 
 	return changed
 }
 
 func CurrentNodes() map[string]*NodeConsoleInfo {
-	log.Println("Trying to lock")
 	currNodesMutex.Lock()
-	log.Println("Locked")
-
+	
 	defer currNodesMutex.Unlock()
 
 	// create a copy of the current nodes to return
@@ -376,7 +374,6 @@ func releaseNode(xname string, stopTailing func(string)) bool {
 }
 
 func IsCurrentNode(nodeID string) bool {
-	log.Printf("ins")
 	currNodesMutex.Lock()
 	defer currNodesMutex.Unlock()
 
