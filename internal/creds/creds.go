@@ -26,6 +26,7 @@ package creds
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
@@ -75,10 +76,17 @@ type sshKeys struct {
 }
 
 // Look up the creds for the input endpoints with retries
-func (cs *credsService) GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials {
+func (cs *credsService) GetPasswordsWithRetries(ctx context.Context, bmcXNames []string, maxTries, waitSecs int) (map[string]compcreds.CompCredentials, error) {
 	var passwords map[string]compcreds.CompCredentials = nil
 	var err error = nil
 	for numTries := 0; numTries < maxTries; numTries++ {
+		select {
+		case <-ctx.Done():
+			slog.Info("Stopping credential retrieval due to context cancellation")
+			return passwords, ctx.Err()
+		default:
+		}
+
 		slog.Debug("Get passwords with retry", "attempt", numTries)
 		passwords, err = getPasswords(cs.config, bmcXNames)
 
@@ -102,13 +110,19 @@ func (cs *credsService) GetPasswordsWithRetries(bmcXNames []string, maxTries, wa
 		}
 		slog.Warn("Only retrieved subset of creds from vault, waiting and trying again",
 			"attempt", numTries, "retrieved", len(passwords), "total", len(bmcXNames))
-		time.Sleep(time.Duration(waitSecs) * time.Second)
+
+		select {
+		case <-ctx.Done():
+			slog.Info("Stopping credential retrieval due to context cancellation")
+			return passwords, ctx.Err()
+		case <-time.After(time.Duration(waitSecs) * time.Second):
+		}
 	}
 	slog.Warn("Maximum password attempts reached, configuring conman with what we have")
 
 	cs.previousPasswords = passwords
 
-	return passwords
+	return passwords, err
 }
 
 func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {

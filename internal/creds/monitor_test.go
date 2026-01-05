@@ -1,6 +1,7 @@
 package creds
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -53,7 +54,8 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 	require.False(t, changed, "Passwords should not have changed")
 
 	// Call GetPasswordsWithRetry to set previousPasswords
-	service.GetPasswordsWithRetries(nodes, 3, 1)
+	_, err = service.GetPasswordsWithRetries(context.Background(), nodes, 3, 1)
+	require.NoError(t, err)
 
 	// Now change a password
 	value := map[string]string{

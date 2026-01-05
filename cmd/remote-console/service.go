@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
@@ -30,7 +30,7 @@ type ConmanService interface {
 
 // CredsService defines the interface for credentials service operations
 type CredsService interface {
-	GetPasswordsWithRetries(bmcXNames []string, maxTries, waitSecs int) map[string]compcreds.CompCredentials
+	GetPasswordsWithRetries(ctx context.Context, bmcXNames []string, maxTries, waitSecs int) (map[string]compcreds.CompCredentials, error)
 	EnsureConsoleKeysPresent() (bool, error)
 	CheckForUpdates() (bool, error)
 }
@@ -155,6 +155,16 @@ func runConman(ctx context.Context, config remoteConsoleConfig, conmanService Co
 		panic("Conman service is nil")
 	}
 
+	waitWithContext := func(d time.Duration) bool {
+		select {
+		case <-ctx.Done():
+			slog.Info("Exiting conman loop due to shutdown")
+			return true
+		case <-time.After(d):
+			return false
+		}
+	}
+
 	for {
 		// Check for shutdown before processing
 		select {
@@ -164,40 +174,43 @@ func runConman(ctx context.Context, config remoteConsoleConfig, conmanService Co
 		default:
 		}
 
-		nodes := nodes.CurrentNodes()
+		currentNodes := nodes.CurrentNodes()
 
 		var requireCredentials []string
-		for _, nci := range nodes {
+		for _, nci := range currentNodes {
 			requireCredentials = append(requireCredentials, nci.ID)
 		}
 
-		passwords := credService.GetPasswordsWithRetries(requireCredentials, 15, 10)
-		hasNodes, err := conmanService.ConfigureConman(nodes, passwords, config.Creds.SshConsoleKeyPath)
+		passwords, err := credService.GetPasswordsWithRetries(ctx, requireCredentials, 15, 10)
+		if err != nil {
+			slog.Warn("Credential retrieval ended early", "error", err)
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+		}
+
+		hasNodes, err := conmanService.ConfigureConman(currentNodes, passwords, config.Creds.SshConsoleKeyPath)
 		if err != nil {
 			slog.Error("Failed to configure conman", "error", err)
-			panic(fmt.Sprintf("Failed to configure conman: %s", err))
+			if waitWithContext(5 * time.Second) {
+				return
+			}
+			continue
 		}
 
 		if !hasNodes {
 			slog.Info("No console nodes found - trying again")
-			select {
-			case <-ctx.Done():
-				slog.Info("Exiting conman loop due to shutdown")
+			if waitWithContext(30 * time.Second) {
 				return
-			case <-time.After(30 * time.Second):
 			}
 		} else {
 			err := conmanService.ExecuteConman()
 			if err != nil {
 				slog.Error("Failed to execute conman", "error", err)
-				panic(fmt.Sprintf("Failed to execute conman: %s", err))
 			}
 		}
-		select {
-		case <-ctx.Done():
-			slog.Info("Exiting conman loop due to shutdown")
+		if waitWithContext(10 * time.Second) {
 			return
-		case <-time.After(10 * time.Second):
 		}
 	}
 }
