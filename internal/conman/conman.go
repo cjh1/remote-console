@@ -146,23 +146,26 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 }
 
 func willUpdateConfig(baseConfig []byte) bool {
-	buff := make([]byte, 50)
-	n := len(baseConfig)
-	if n < 50 {
-		slog.Warn("Base configuration truncated")
+	// if the first line of the base configuration file has '# UPDATE_CONFIG=FALSE'
+	// then bail on the update
+	// NOTE: only reading first 50 bytes of file, should be at least that many
+	//  present if this is a valid base configuration file and don't need to read more.
+	const key = "UPDATE_CONFIG="
+	configStr := string(baseConfig)
+
+	keyPostion := strings.Index(configStr, key)
+	if keyPostion == -1 {
 		return false
 	}
 
-	s := string(buff[:n])
-	retVal := false
-	ss := "UPDATE_CONFIG="
-	pos := strings.Index(s, ss)
-	if pos > 0 {
-		valPos := pos + len(ss)
-		retVal = s[valPos] != 'F' && s[valPos] != 'f'
+	valuePosition := keyPostion + len(key)
+	if valuePosition >= len(configStr) {
+		slog.Warn("Base configuration missing UPDATE_CONFIG value")
+		return false
 	}
 
-	return retVal
+	value := configStr[valuePosition]
+	return value != 'F' && value != 'f'
 }
 
 // SignalConmanTERM sends SIGTERM to running conmand process
