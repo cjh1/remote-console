@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -43,7 +45,8 @@ type LogsService interface {
 // Watch for node updates and signal conman and log rotation as needed
 func watchForNodesUpdates(config remoteConsoleConfig, conmanService ConmanService, logsService LogsService) {
 	if conmanService == nil {
-		log.Panicf("Conman service is nil")
+		slog.Error("Conman service is nil")
+		panic("Conman service is nil")
 	}
 
 	// conman will add the conman directory, so we point the logs service their
@@ -52,23 +55,23 @@ func watchForNodesUpdates(config remoteConsoleConfig, conmanService ConmanServic
 	for {
 		// look for new nodes once
 		if isShuttingDown() {
-			log.Printf("Info: Exiting node watch loop due to shutdown")
+			slog.Info("Exiting node watch loop due to shutdown")
 			return
 		}
 		changed := nodes.CheckForUpdates(config.SmdURL)
 
 		if changed {
-			log.Printf("Info: Node changes detected, signaling conman to restart")
+			slog.Info("Node changes detected, signaling conman to restart")
 			conmanService.SignalConmanTERM()
 
 			nodes := nodes.CurrentNodes()
 
 			// also update log rotation configuration
-			log.Printf("Info: Node changes detected, updating log rotation configuration")
+			slog.Info("Updating log rotation configuration for node changes")
 			logsService.UpdateLogRotateConf(conmanLogsPath, nodes)
 
 			// make sure we are aggregating any new console log files
-			log.Printf("Info: Node changes detected, updating log aggregation configuration")
+			slog.Info("Updating log aggregation configuration for node changes")
 			logsService.AggregateFiles(conmanLogsPath, nodes)
 		}
 
@@ -83,11 +86,11 @@ func watchForCredUpdates(config remoteConsoleConfig, credsService CredsService, 
 	for {
 		changed, err := credsService.CheckForUpdates()
 		if err != nil {
-			log.Printf("Error checking for credential updates: %s", err)
+			slog.Error("Failed to check for credential updates", "error", err)
 		}
 
 		if changed {
-			log.Printf("Info: Credential changes detected, signaling conman to restart")
+			slog.Info("Credential changes detected, signaling conman to restart")
 			conmanService.SignalConmanTERM()
 		}
 
@@ -99,9 +102,13 @@ func watchForCredUpdates(config remoteConsoleConfig, credsService CredsService, 
 func logRotate(config remoteConsoleConfig, conmanService ConmanService, logsService LogsService) {
 	logConfig := config.Log
 	// log the log rotation parameters
-	log.Printf("LOG ROTATE: Log rotation enabled: %v, Check Freq Sec: %d", logConfig.LogRotateEnabled, logConfig.LogRotateCheckFrequency)
-	log.Printf("LOG ROTATE: Log rotation console file size: %s, num rotate: %d", logConfig.ConsoleLogsFileSize, logConfig.ConsoleLogsNumRotate)
-	log.Printf("LOG ROTATE: Log rotation aggregation file size: %s, num rotate: %d", logConfig.AggLogsFileSize, logConfig.AggLogsNumRotate)
+	slog.Info("Log rotation configuration",
+		"enabled", logConfig.LogRotateEnabled,
+		"checkFrequencySec", logConfig.LogRotateCheckFrequency,
+		"consoleFileSize", logConfig.ConsoleLogsFileSize,
+		"consoleNumRotate", logConfig.ConsoleLogsNumRotate,
+		"aggFileSize", logConfig.AggLogsFileSize,
+		"aggNumRotate", logConfig.AggLogsNumRotate)
 
 	// conman will add the conman directory, so we point the logs service their
 	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
@@ -114,13 +121,13 @@ func logRotate(config remoteConsoleConfig, conmanService ConmanService, logsServ
 	if logRotCheckFreqSec > 0 {
 		sleepSecs = time.Duration(logRotCheckFreqSec) * time.Second
 	} else {
-		log.Printf("Log rotation frequency invalid, defaulting to 5 min. Input value:%d", logRotCheckFreqSec)
+		slog.Warn("Log rotation frequency invalid, defaulting to 5 min", "inputValue", logRotCheckFreqSec)
 	}
 
 	for {
 		restartConman := logsService.LogRotate(conmanLogsPath)
 		if restartConman {
-			log.Print("LOG ROTATE: Log files rotated, signaling conmand")
+			slog.Info("Log files rotated, signaling conmand")
 			conmanService.SignalConmanHUP()
 		}
 
@@ -130,7 +137,8 @@ func logRotate(config remoteConsoleConfig, conmanService ConmanService, logsServ
 
 func runConman(config remoteConsoleConfig, conmanService ConmanService, credService CredsService) {
 	if conmanService == nil {
-		log.Panicf("Conman service is nil")
+		slog.Error("Conman service is nil")
+		panic("Conman service is nil")
 	}
 
 	for {
@@ -144,16 +152,18 @@ func runConman(config remoteConsoleConfig, conmanService ConmanService, credServ
 		passwords := credService.GetPasswordsWithRetries(requireCredentials, 15, 10)
 		hasNodes, err := conmanService.ConfigureConman(nodes, passwords, config.Creds.SshConsoleKeyPath)
 		if err != nil {
-			log.Panicf("Error configuring conman: %s", err)
+			slog.Error("Failed to configure conman", "error", err)
+			panic(fmt.Sprintf("Failed to configure conman: %s", err))
 		}
 
 		if !hasNodes {
-			log.Printf("No console nodes found - trying again")
+			slog.Info("No console nodes found - trying again")
 			time.Sleep(30 * time.Second)
 		} else {
 			err := conmanService.ExecuteConman()
 			if err != nil {
-				log.Panicf("Error executing conman: %s", err)
+				slog.Error("Failed to execute conman", "error", err)
+				panic(fmt.Sprintf("Failed to execute conman: %s", err))
 			}
 		}
 		time.Sleep(10 * time.Second)
@@ -162,9 +172,9 @@ func runConman(config remoteConsoleConfig, conmanService ConmanService, credServ
 
 func runService(config remoteConsoleConfig) error {
 
-	log.Printf("Remote console service starting")
+	slog.Info("Remote console service starting")
 	// Set up the zombie killer
-	log.Printf("Starting zombie killer...")
+	slog.Info("Starting zombie killer")
 	go conman.WatchForZombies()
 
 	conmanService := conman.NewConmanService(config.Conman)
@@ -187,7 +197,7 @@ func runService(config remoteConsoleConfig) error {
 	logsService.EnsureAggLog()
 
 	if _, err := credsService.EnsureConsoleKeysPresent(); err != nil {
-		log.Printf("Error ensuring console SSH keys present: %v", err)
+		slog.Warn("Failed to ensure console SSH keys present", "error", err)
 	}
 
 	// Start log rotation with callback to signal conman
@@ -214,7 +224,7 @@ func runService(config remoteConsoleConfig) error {
 	// need to pass that full path to service monitoring the logs
 	console.SetupRoutes(conmanLogsPath)
 
-	log.Printf("Spinning up http server...")
+	slog.Info("Starting HTTP server", "address", config.HttpListen)
 	server := &http.Server{Addr: config.HttpListen, Handler: console.RequestRouter}
 
 	// signal to cleanly shut down
@@ -222,7 +232,7 @@ func runService(config remoteConsoleConfig) error {
 
 		// NOTE: do not use log.Fatal as that will immediately exit
 		// the program and short-circuit the shutdown logic below
-		log.Printf("Info: Server %s\n", server.ListenAndServe())
+		slog.Info("Server started", "result", server.ListenAndServe())
 	}()
 
 	serverCtx, serverStopCtx := context.WithCancel(context.Background())
@@ -231,7 +241,7 @@ func runService(config remoteConsoleConfig) error {
 	go func() {
 		sig := <-sigs
 		inShutdown = true
-		log.Printf("Info: Detected signal to close service: %s", sig)
+		slog.Info("Detected signal to close service", "signal", sig)
 
 		// Shutdown signal with grace period of 30 seconds
 		shutdownCtx, shutdownCtxCancel := context.WithTimeout(serverCtx, 30*time.Second)
@@ -254,7 +264,7 @@ func runService(config remoteConsoleConfig) error {
 
 	// // Wait for server context to be stopped
 	<-serverCtx.Done()
-	log.Printf("Info: Shutdown complete.")
+	slog.Info("Shutdown complete")
 
 	return nil
 }

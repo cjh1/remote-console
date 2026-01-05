@@ -29,14 +29,12 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 )
 
 var (
-	// Debug logging (default is off)
-	debugLog = DebugLog{enabled: false}
-
 	inShutdown bool = false
 )
 
@@ -53,8 +51,7 @@ func isShuttingDown() bool {
 }
 
 func main() {
-	// Enable debug logging if requested.
-	debugLog.Init()
+	initLogger()
 
 	config := DefaultConfig()
 	cli := command(&config)
@@ -64,24 +61,27 @@ func main() {
 	}
 }
 
-// DebugLog enables debug logging.
-type DebugLog struct {
-	enabled bool
-}
-
-// Init initializes the debug logger.
-func (l *DebugLog) Init() {
-	if value, ok := os.LookupEnv("DEBUG"); ok {
-		if value != "" && strings.ToUpper(value) == "TRUE" {
-			l.enabled = true
-			l.Println("Debug logging enabled.")
+// initLogger sets up structured logging with slog
+func initLogger() {
+	// Determine log level from environment
+	level := slog.LevelInfo
+	if logLevel := os.Getenv("LOG_LEVEL"); logLevel != "" {
+		if err := level.UnmarshalText([]byte(logLevel)); err != nil {
+			// If parsing fails, keep default INFO level
+			slog.Warn("Invalid LOG_LEVEL, using INFO", "value", logLevel, "error", err)
 		}
 	}
-}
 
-// Println writes out a debug log statement.
-func (l *DebugLog) Println(msg string) {
-	if l.enabled {
-		log.Printf("[DEBUG]: %s\n", msg)
+	// Determine format from environment (json or text)
+	format := strings.ToLower(os.Getenv("LOG_FORMAT"))
+	var handler slog.Handler
+	if format == "json" {
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	} else {
+		// Default to text format for development
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
 	}
+
+	slog.SetDefault(slog.New(handler))
+	slog.Info("Logger initialized", "level", level.String(), "format", format)
 }

@@ -29,6 +29,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -62,20 +63,20 @@ func (ls *logsService) stopTailing(xname string) {
 // watchConsoleLogFile tails a console log file and writes to aggregation log
 func (ls *logsService) watchConsoleLogFile(ctx context.Context, consoleLogsPath string, xname string) {
 	filename := fmt.Sprintf("%s/console.%s", consoleLogsPath, xname)
-	log.Printf("Setting up tail of %s", filename)
+	slog.Info("Setting up console log tail", "filename", filename, "xname", xname)
 
 	// set up a tail operation on the console file
 	t, err := tail.TailFile(filename, tail.Config{Follow: true, ReOpen: true, MustExist: false})
 	if err != nil {
-		log.Printf("Error setting up tail on file %s:%s", filename, err)
+		slog.Error("Failed to setup tail on file", "filename", filename, "error", err)
 		return
 	}
 
-	log.Printf("Starting tail process loop for %s", xname)
+	slog.Debug("Starting tail process loop", "xname", xname)
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Cancelling tail of %s", xname)
+			slog.Debug("Cancelling tail", "xname", xname)
 			t.Stop()
 			return
 		case line, ok := <-t.Lines:
@@ -84,7 +85,7 @@ func (ls *logsService) watchConsoleLogFile(ctx context.Context, consoleLogsPath 
 				return
 			}
 			if line.Err != nil {
-				log.Printf("Error reading line from %s:%s", xname, line.Err)
+				slog.Error("Error reading line from console", "xname", xname, "error", line.Err)
 				continue
 			}
 			ls.writeToAggLog(xname, line.Text)
@@ -109,7 +110,7 @@ func (ls *logsService) openAggLogLocked() {
 	if ls.conAggLogFile == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
-			log.Printf("Error getting hostname:%s", err)
+			slog.Warn("Failed to get hostname, using 'unknown'", "error", err)
 			hostname = "unknown"
 		}
 		ls.conAggLogFile = fmt.Sprintf("%s/consoleAgg-%s.log", ls.config.AggLogsPath, hostname)
@@ -117,18 +118,18 @@ func (ls *logsService) openAggLogLocked() {
 
 	dir := filepath.Dir(ls.conAggLogFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Printf("Error creating aggregation log directory %s:%s", dir, err)
+		slog.Error("Failed to create aggregation log directory", "directory", dir, "error", err)
 		return
 	}
 
 	calf, err := os.OpenFile(ls.conAggLogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		log.Printf("Error opening aggregation log file %s:%s", ls.conAggLogFile, err)
+		slog.Error("Failed to open aggregation log file", "file", ls.conAggLogFile, "error", err)
 		return
 	}
 
 	ls.conAggFile = calf
-	log.Printf("Started aggregation log file: %s", ls.conAggLogFile)
+	slog.Info("Started aggregation log file", "file", ls.conAggLogFile)
 	ls.conAggLogger = log.New(calf, "", 0)
 	ls.conAggLogger.Print("Starting aggregation log")
 }
@@ -152,7 +153,7 @@ func (ls *logsService) reopenAggLog() {
 
 	if ls.conAggFile != nil {
 		if err := ls.conAggFile.Close(); err != nil {
-			log.Printf("Error closing aggregation log file: %s", err)
+			slog.Error("Failed to close aggregation log file", "error", err)
 		}
 		ls.conAggFile = nil
 	}
@@ -161,8 +162,7 @@ func (ls *logsService) reopenAggLog() {
 }
 
 func (ls *logsService) AggregateFiles(consoleLogsPath string, nodes map[string]*nodes.NodeConsoleInfo) {
-	fmt.Printf("AggregateFiles: Starting aggregation of console log files\n")
-	fmt.Printf("AggregateFiles: Starting aggregation of console log files: %d\n", len(nodes))
+	slog.Info("Starting aggregation of console log files", "nodeCount", len(nodes), "path", consoleLogsPath)
 
 	// Ensure the aggregation log file is ready before we start tailing console logs.
 	ls.EnsureAggLog()
@@ -175,7 +175,7 @@ func (ls *logsService) AggregateFiles(consoleLogsPath string, nodes map[string]*
 	// Stop tailing nodes that are no longer in the list
 	for xname := range ls.tailThreads {
 		if _, exists := nodes[xname]; !exists {
-			log.Printf("Node %s no longer present, stopping tail", xname)
+			slog.Info("Stopping tail for removed node", "xname", xname)
 			ls.stopTailing(xname)
 		}
 	}
