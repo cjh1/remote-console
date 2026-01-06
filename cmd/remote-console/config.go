@@ -16,6 +16,8 @@ type remoteConsoleConfig struct {
 	NewNodeLookup        int    `desc:"Interval in seconds to look for new nodes"`
 	CredsMonitorInterval int    `desc:"Interval in seconds to monitor credential updates"`
 	SmdURL               string `desc:"URL for the SMD service"`
+	JwksURL              string `desc:"JWKS URL for fetching public keys for JWT validation (optional)"`
+	JwksFetchInterval    int    `desc:"Interval in seconds to retry fetching JWKS on failure"`
 }
 
 func DefaultConfig() remoteConsoleConfig {
@@ -27,6 +29,8 @@ func DefaultConfig() remoteConsoleConfig {
 		NewNodeLookup:        120,
 		CredsMonitorInterval: 30,
 		SmdURL:               "http://cray-smd/",
+		JwksURL:              "",
+		JwksFetchInterval:    5,
 	}
 }
 

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -251,6 +251,40 @@ func runService(config remoteConsoleConfig) error {
 	// start the thread that will make sure that the conman creds are correct
 	go watchForCredUpdates(serviceCtx, config, credsService, conmanService)
 
+	// Initialize JWT token authorization if JWKS URL is provided
+	if config.JwksURL != "" {
+		slog.Info("Fetching public key from JWKS URL", "url", config.JwksURL)
+		maxRetries := 5
+		var lastErr error
+		for i := 0; i <= maxRetries; i++ {
+			err := console.FetchPublicKeyFromURL(config.JwksURL)
+			if err != nil {
+				lastErr = err
+				slog.Error("Failed to fetch public key from JWKS URL",
+					"url", config.JwksURL,
+					"attempt", i+1,
+					"maxRetries", maxRetries+1,
+					"error", err)
+				if i < maxRetries {
+					time.Sleep(time.Duration(config.JwksFetchInterval) * time.Second)
+					continue
+				}
+			} else {
+				slog.Info("Successfully initialized JWT authentication")
+				lastErr = nil
+				break
+			}
+		}
+		if lastErr != nil {
+			// JWKS URL was explicitly provided but we couldn't fetch it
+			// This is a fatal error - don't start with unprotected endpoints
+			slog.Error("Failed to initialize JWT authentication after all retries - refusing to start with unprotected endpoints")
+			return fmt.Errorf("failed to fetch JWKS from %s: %w", config.JwksURL, lastErr)
+		}
+	} else {
+		slog.Warn("No JWKS URL provided - JWT authentication is disabled")
+	}
+
 	// Setup a channel to wait for the os to tell us to stop.
 	// NOTE - This must be set up before initializing anything that needs
 	//  to be cleaned up.  This will trap any signals and wait to
@@ -260,10 +294,10 @@ func runService(config remoteConsoleConfig) error {
 
 	// Conman will append "conman" to this path for its logs, so we
 	// need to pass that full path to service monitoring the logs
-	console.SetupRoutes(conmanLogsPath)
+	router := console.SetupRoutes(conmanLogsPath)
 
 	slog.Info("Starting HTTP server", "address", config.HttpListen)
-	server := &http.Server{Addr: config.HttpListen, Handler: console.RequestRouter}
+	server := &http.Server{Addr: config.HttpListen, Handler: router}
 
 	// signal to cleanly shut down
 	go func() {

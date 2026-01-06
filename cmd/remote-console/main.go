@@ -28,7 +28,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -38,17 +37,6 @@ var (
 	inShutdown bool = false
 )
 
-// Get environment var with default.
-func getEnv(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	return fallback
-}
-
-func isShuttingDown() bool {
-	return inShutdown
-}
 
 func main() {
 	initLogger()

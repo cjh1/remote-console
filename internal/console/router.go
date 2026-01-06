@@ -25,56 +25,61 @@
 package console
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
+	"github.com/OpenCHAMI/jwtauth/v5"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	openchami_authenticator "github.com/openchami/chi-middleware/auth"
 	"github.com/gorilla/websocket"
 )
 
-func sendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(sc)
-
-	if data != nil {
-		err := json.NewEncoder(w).Encode(data)
-		if err != nil {
-			slog.Error("Failed to encode JSON response", "error", err)
-			return
-		}
-	}
-}
-
-var RequestRouter = chi.NewRouter()
 
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow connections from any origin for now
-		// In production, you should check the origin
+		// JWT authentication is handled by middleware before upgrade
+		// No need for Origin checking since this is for CLI clients
 		return true
 	},
 }
 
-func SetupRoutes(consoleLogsPath string) {
-	// k8s routes
-	RequestRouter.Get("/remote-console/liveness", doLiveness)
-	RequestRouter.Get("/remote-console/readiness", doReadiness)
-	RequestRouter.Get("/remote-console/health", doHealth)
+func SetupRoutes(consoleLogsPath string) *chi.Mux {
+	router := chi.NewRouter()
+	
+	// Add common middleware
+	router.Use(middleware.RedirectSlashes)
 
-	RequestRouter.Get("/remote-console/consoles", doConsoles)
+	// Public routes (no authentication required)
+	router.Get("/remote-console/liveness", doLiveness)
+	router.Get("/remote-console/readiness", doReadiness)
+	router.Get("/remote-console/health", doHealth)
 
-	// WebSocket console access endpoints
-	// These handle their own errors via WebSocket close frames after upgrade
-	RequestRouter.Get("/remote-console/consoles/{nodeID}/tail", func(w http.ResponseWriter, r *http.Request) {
-		doTailConsole(consoleLogsPath, w, r)
+	// Protected routes - add to a sub-router with JWT middleware
+	router.Group(func(r chi.Router) {
+		// Conditionally add JWT authentication middleware
+		if TokenAuth != nil {
+			r.Use(
+				jwtauth.Verifier(TokenAuth),
+				openchami_authenticator.AuthenticatorWithRequiredClaims(TokenAuth, []string{"sub", "iss", "aud"}),
+			)
+		} else {
+			slog.Warn("JWT authentication is disabled - all console endpoints are unprotected")
+		}
+
+		r.Get("/remote-console/consoles", doConsoles)
+		r.Get("/remote-console/consoles/{nodeID}/tail", func(w http.ResponseWriter, r *http.Request) {
+			doTailConsole(consoleLogsPath, w, r)
+		})
+		r.Get("/remote-console/consoles/{nodeID}", doInteractiveConsole)
 	})
-	RequestRouter.Get("/remote-console/consoles/{nodeID}", doInteractiveConsole)
 
 	// debug only routes
 	// router.Get("/remote-console/info", dbs.doInfo)
 	// router.Delete("/remote-console/clearData", dbs.doClearData)
 	// router.Post("/remote-console/suspend", dbs.doSuspend)
 	// router.Post("/remote-console/resume", dbs.doResume)
+	
+	return router
 }
