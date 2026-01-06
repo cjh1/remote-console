@@ -44,11 +44,6 @@ type LogsService interface {
 
 // Watch for node updates and signal conman and log rotation as needed
 func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, conmanService ConmanService, logsService LogsService) {
-	if conmanService == nil {
-		slog.Error("Conman service is nil")
-		panic("Conman service is nil")
-	}
-
 	// conman will add the conman directory, so we point the logs service their
 	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
 
@@ -150,11 +145,6 @@ func logRotate(ctx context.Context, config remoteConsoleConfig, conmanService Co
 }
 
 func runConman(ctx context.Context, config remoteConsoleConfig, conmanService ConmanService, credService CredsService) {
-	if conmanService == nil {
-		slog.Error("Conman service is nil")
-		panic("Conman service is nil")
-	}
-
 	waitWithContext := func(d time.Duration) bool {
 		select {
 		case <-ctx.Done():
@@ -227,7 +217,8 @@ func runService(config remoteConsoleConfig) error {
 	// then we set up the goroutine that controls conman
 	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
 	if err := os.MkdirAll(conmanLogsPath, 0755); err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to create console logs directory", "path", conmanLogsPath, "error", err)
+		return err
 	}
 
 	credsService := creds.NewCredsService(config.Creds)
@@ -300,14 +291,16 @@ func runService(config remoteConsoleConfig) error {
 			<-shutdownCtx.Done()
 			if shutdownCtx.Err() == context.DeadlineExceeded {
 				shutdownCtxCancel()
-				log.Fatal("graceful shutdown timed out.. forcing exit.")
+				slog.Error("Graceful shutdown timed out, forcing exit")
+				os.Exit(1)
 			}
 		}()
 
 		// Trigger graceful shutdown
 		err := server.Shutdown(shutdownCtx)
 		if err != nil {
-			log.Fatal(err)
+			slog.Error("Failed to shutdown HTTP server gracefully", "error", err)
+			os.Exit(1)
 		}
 		serverStopCtx()
 	}()

@@ -57,7 +57,8 @@ func main() {
 	cli := command(&config)
 
 	if err := cli.Run(context.Background(), os.Args); err != nil {
-		log.Fatal(err)
+		slog.Error("Service failed", "error", err)
+		os.Exit(1)
 	}
 }
 
