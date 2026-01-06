@@ -153,12 +153,12 @@ func willUpdateConfig(baseConfig []byte) bool {
 	const key = "UPDATE_CONFIG="
 	configStr := string(baseConfig)
 
-	keyPostion := strings.Index(configStr, key)
-	if keyPostion == -1 {
+	keyPosition := strings.Index(configStr, key)
+	if keyPosition == -1 {
 		return false
 	}
 
-	valuePosition := keyPostion + len(key)
+	valuePosition := keyPosition + len(key)
 	if valuePosition >= len(configStr) {
 		slog.Warn("Base configuration missing UPDATE_CONFIG value")
 		return false
