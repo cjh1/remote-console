@@ -618,8 +618,8 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 	defer resp.Body.Close()
 	defer wsConn.Close()
 
-	testMsg := "hostname\r"
-	err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
+	cmd := "hostname\r"
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte(cmd))
 	s.Require().NoError(err, "Error sending test message to console")
 
 	expectedHostLine := newNodeID + "\r\n"

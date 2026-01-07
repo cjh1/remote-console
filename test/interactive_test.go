@@ -103,8 +103,8 @@ func (s *IntegrationTestSuite) TestConsoleInteractive() {
 			defer resp.Body.Close()
 			defer wsConn.Close()
 
-			testMsg := "hostname\r"
-			err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
+			cmd := "hostname\r"
+			err = wsConn.WriteMessage(websocket.TextMessage, []byte(cmd))
 			s.Require().NoError(err, "Error sending test message to console")
 
 			expectedHostLine := console.nodeID + "\r\n"
@@ -127,8 +127,8 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveTail() {
 			defer resp.Body.Close()
 			defer wsConn.Close()
 
-			testMsg := "hostname\r"
-			err = wsConn.WriteMessage(websocket.TextMessage, []byte(testMsg))
+			cmd := "hostname\r"
+			err = wsConn.WriteMessage(websocket.TextMessage, []byte(cmd))
 			s.Require().NoError(err, "Error sending test message to console")
 
 			expectedHostLine := console.nodeID + "\r\n"
