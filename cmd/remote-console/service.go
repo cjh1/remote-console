@@ -18,7 +18,11 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
+
+const smdHTTPTimeout = 15 * time.Second
 
 // ConmanService defines the interface for conman service operations
 type ConmanService interface {
@@ -43,7 +47,7 @@ type LogsService interface {
 }
 
 // Watch for node updates and signal conman and log rotation as needed
-func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, conmanService ConmanService, logsService LogsService) {
+func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, httpClient *http.Client, conmanService ConmanService, logsService LogsService) {
 	// conman will add the conman directory, so we point the logs service their
 	conmanLogsPath := filepath.Join(config.Conman.LogsPath, "conman")
 
@@ -56,7 +60,7 @@ func watchForNodesUpdates(ctx context.Context, config remoteConsoleConfig, conma
 			slog.Info("Exiting node watch loop due to shutdown")
 			return
 		case <-ticker.C:
-			changed := nodes.CheckForUpdates(ctx, config.SmdURL)
+			changed := nodes.CheckForUpdates(ctx, httpClient, config.SmdURL)
 
 			if changed {
 				slog.Info("Node changes detected, signaling conman to restart")
@@ -239,11 +243,43 @@ func runService(config remoteConsoleConfig) error {
 	// Create service context for coordinating shutdown of background goroutines
 	serviceCtx, serviceStopCtx := context.WithCancel(context.Background())
 
+	// Configure HTTP client for SMD requests
+	var smdHTTPClient *http.Client
+	if config.Oauth2.TokenURL != "" {
+		slog.Info("Configuring OAuth2 client for SMD authentication")
+
+		clientConfig := &clientcredentials.Config{
+			ClientID:     config.Oauth2.ClientID,
+			ClientSecret: config.Oauth2.ClientSecret,
+			TokenURL:     config.Oauth2.TokenURL,
+			Scopes:       config.Oauth2.Scopes,
+			AuthStyle:    oauth2.AuthStyleInHeader,
+		}
+
+		ctx := context.Background()
+		ts := clientConfig.TokenSource(ctx)
+
+		// Create HTTP client with OAuth2 transport
+		smdHTTPClient = &http.Client{
+			Transport: &oauth2.Transport{
+				Source: ts,
+				Base:   http.DefaultTransport,
+			},
+			Timeout: smdHTTPTimeout,
+		}
+		slog.Info("OAuth2 client configured for SMD requests")
+	} else {
+		// Use default HTTP client without OAuth2
+		smdHTTPClient = &http.Client{
+			Timeout: smdHTTPTimeout,
+		}
+	}
+
 	// Start log rotation with callback to signal conman
 	go logRotate(serviceCtx, config, conmanService, logsService)
 
 	// spin a thread that watches for changes in console configuration
-	go watchForNodesUpdates(serviceCtx, config, conmanService, logsService)
+	go watchForNodesUpdates(serviceCtx, config, smdHTTPClient, conmanService, logsService)
 
 	// start up the thread that runs conman
 	go runConman(serviceCtx, config, conmanService, credsService)
@@ -279,6 +315,7 @@ func runService(config remoteConsoleConfig) error {
 			// JWKS URL was explicitly provided but we couldn't fetch it
 			// This is a fatal error - don't start with unprotected endpoints
 			slog.Error("Failed to initialize JWT authentication after all retries - refusing to start with unprotected endpoints")
+			serviceStopCtx()
 			return fmt.Errorf("failed to fetch JWKS from %s: %w", config.JwksURL, lastErr)
 		}
 	} else {

@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -142,12 +143,12 @@ func (sc stateComponent) String() string {
 }
 
 // getComponentEndpoints queries HSM for the component endpoints
-func getComponentEndpoints(ctx context.Context, smdURL string) ([]componentEndpoint, error) {
+func getComponentEndpoints(ctx context.Context, httpClient *http.Client, smdURL string) ([]componentEndpoint, error) {
 	var response componentEndpoints
 
 	// Query hsm to get the component endpoints
 	URL := smdURL + "hsm/v2/Inventory/ComponentEndpoints"
-	data, _, err := utils.GetURL(ctx, URL, nil)
+	data, _, err := utils.GetURL(ctx, httpClient, URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get component endpoints from hsm: %w", err)
 	}
@@ -229,11 +230,11 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 }
 
 // GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
-func currentNodesFromSMD(ctx context.Context, smdURL string) (nodes []NodeConsoleInfo, err error) {
+func currentNodesFromSMD(ctx context.Context, httpClient *http.Client, smdURL string) (nodes []NodeConsoleInfo, err error) {
 
 	slog.Info("Starting to get current nodes on the system")
 
-	endpoints, err := getComponentEndpoints(ctx, smdURL)
+	endpoints, err := getComponentEndpoints(ctx, httpClient, smdURL)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get component endpoints: %w", err)
 	}
@@ -315,14 +316,14 @@ func updateNodes(nodes []NodeConsoleInfo) bool {
 	return changed
 }
 
-func CheckForUpdates(ctx context.Context, smdURL string) bool {
+func CheckForUpdates(ctx context.Context, httpClient *http.Client, smdURL string) bool {
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
 
 	slog.Info("Getting current nodes from HSM")
 	// keep track of if we need to redo the configuration
 	changed := false
 
-	fetched_nodes, err := currentNodesFromSMD(ctx, smdURL)
+	fetched_nodes, err := currentNodesFromSMD(ctx, httpClient, smdURL)
 	if err != nil {
 		slog.Error("Error getting current nodes from SMD", "error", err)
 		return false

@@ -35,7 +35,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 )
 
 type ErrResponse struct {
@@ -66,11 +65,12 @@ func SendResponseJSON(w http.ResponseWriter, sc int, data interface{}) {
 	}
 }
 
-const defaultHTTPTimeout = 15 * time.Second
-
-func PostURL(ctx context.Context, URL string, requestBody []byte, requestHeaders map[string]string) ([]byte, int, error) {
+func PostURL(ctx context.Context, httpClient *http.Client, URL string, requestBody []byte, requestHeaders map[string]string) ([]byte, int, error) {
 	if ctx == nil {
 		return nil, -1, fmt.Errorf("nil context")
+	}
+	if httpClient == nil {
+		return nil, -1, fmt.Errorf("nil httpClient")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", URL, bytes.NewReader(requestBody))
@@ -83,8 +83,7 @@ func PostURL(ctx context.Context, URL string, requestBody []byte, requestHeaders
 		req.Header.Add(k, v)
 	}
 
-	client := &http.Client{Timeout: defaultHTTPTimeout}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -102,9 +101,12 @@ func PostURL(ctx context.Context, URL string, requestBody []byte, requestHeaders
 	return data, resp.StatusCode, err
 }
 
-func GetURL(ctx context.Context, URL string, requestHeaders map[string]string) ([]byte, int, error) {
+func GetURL(ctx context.Context, httpClient *http.Client, URL string, requestHeaders map[string]string) ([]byte, int, error) {
 	if ctx == nil {
 		return nil, -1, fmt.Errorf("nil context")
+	}
+	if httpClient == nil {
+		return nil, -1, fmt.Errorf("nil httpClient")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", URL, nil)
@@ -116,8 +118,7 @@ func GetURL(ctx context.Context, URL string, requestHeaders map[string]string) (
 		req.Header.Add(k, v)
 	}
 
-	client := &http.Client{Timeout: defaultHTTPTimeout}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
