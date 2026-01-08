@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -18,12 +19,12 @@ func (s *IntegrationTestSuite) TestConsoleCredentialRefresh() {
 
 	// Always restore the correct password so other tests are not affected.
 	defer func() {
-		if err := setConsoleCredentials(s.ctx, s.vaultContainer, nodeID, username, correctPassword); err != nil {
+		if err := setConsoleCredentials(context.Background(), s.vaultContainer, nodeID, username, correctPassword); err != nil {
 			s.T().Fatalf("failed to restore credentials for %s: %v", nodeID, err)
 		}
 	}()
 
-	s.Require().NoError(setConsoleCredentials(s.ctx, s.vaultContainer, nodeID, username, correctPassword))
+	s.Require().NoError(setConsoleCredentials(context.Background(), s.vaultContainer, nodeID, username, correctPassword))
 
 	wsConn, resp, err := s.connectInteractiveConsole(nodeID, ":~$ ", promptTimeout)
 	s.Require().NoError(err)
@@ -37,7 +38,7 @@ func (s *IntegrationTestSuite) TestConsoleCredentialRefresh() {
 	s.Require().Contains(hostnameOutput, nodeID+"\r\n")
 
 	s.T().Log("Setting invalid credentials to trigger authentication failure")
-	s.Require().NoError(setConsoleCredentials(s.ctx, s.vaultContainer, nodeID, username, invalidPassword))
+	s.Require().NoError(setConsoleCredentials(context.Background(), s.vaultContainer, nodeID, username, invalidPassword))
 
 	// SSH returns "Permission denied, please try again." when password auth fails.
 	authOutput, err := s.readWebSocketUntil(wsConn, "Permission denied", 2*time.Minute)
@@ -45,7 +46,7 @@ func (s *IntegrationTestSuite) TestConsoleCredentialRefresh() {
 	s.T().Logf("Observed auth error in console output: %s", authOutput)
 
 	s.T().Log("Restoring valid credentials")
-	s.Require().NoError(setConsoleCredentials(s.ctx, s.vaultContainer, nodeID, username, correctPassword))
+	s.Require().NoError(setConsoleCredentials(context.Background(), s.vaultContainer, nodeID, username, correctPassword))
 
 	reconnectMarker := fmt.Sprintf("<ConMan> Connection to console [%s] opened", nodeID)
 	reconnectOutput, err := s.readWebSocketUntil(wsConn, reconnectMarker, 2*time.Minute)

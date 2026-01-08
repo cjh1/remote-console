@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -17,7 +18,7 @@ func (s *IntegrationTestSuite) waitForAggLogFile(timeout time.Duration) (string,
 	var lastErr error
 
 	for time.Now().Before(deadline) {
-		exitCode, reader, err := rcsContainer.Exec(s.ctx, []string{"sh", "-c", "find /tmp -maxdepth 2 -name 'consoleAgg-*.log' | head -n 1"})
+		exitCode, reader, err := rcsContainer.Exec(context.Background(), []string{"sh", "-c", "find /tmp -maxdepth 2 -name 'consoleAgg-*.log' | head -n 1"})
 		if err == nil {
 			data, _ := io.ReadAll(reader)
 			raw := strings.TrimSpace(string(data))
@@ -50,7 +51,7 @@ func (s *IntegrationTestSuite) waitForAggLogEntry(aggPath string, msg string, ti
 
 	for time.Now().Before(deadline) {
 		cmd := fmt.Sprintf("grep -nF '%s' %s || true", safeMsg, aggPath)
-		exitCode, reader, err := rcsContainer.Exec(s.ctx, []string{"sh", "-c", cmd})
+		exitCode, reader, err := rcsContainer.Exec(context.Background(), []string{"sh", "-c", cmd})
 		if err == nil {
 			data, _ := io.ReadAll(reader)
 			output := string(data)
@@ -65,7 +66,7 @@ func (s *IntegrationTestSuite) waitForAggLogEntry(aggPath string, msg string, ti
 	}
 
 	tailCmd := fmt.Sprintf("tail -n 20 %s || true", aggPath)
-	_, tailReader, _ := rcsContainer.Exec(s.ctx, []string{"sh", "-c", tailCmd})
+	_, tailReader, _ := rcsContainer.Exec(context.Background(), []string{"sh", "-c", tailCmd})
 	tailData, _ := io.ReadAll(tailReader)
 
 	return "", fmt.Errorf("aggregation log entry not found for %q; last output: %s; tail:\n%s", msg, lastOutput, string(tailData))

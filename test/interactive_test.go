@@ -182,7 +182,7 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 	s.T().Logf("Adding new node %s to trigger conmand restart", newNodeID)
 
 	authConfig := defaultAuthConfig
-	rfContainer, err := startRedfishEmulator(s.ctx, s.rfNetwork.Name, newNodeID, "ssh", &authConfig)
+	rfContainer, err := startRedfishEmulator(context.Background(), s.rfNetwork.Name, newNodeID, "ssh", &authConfig)
 	s.Require().NoError(err)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -192,7 +192,7 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 		}
 	}()
 
-	sshContainer, err := startSSHPasswordServer(s.ctx, s.consoleNetwork.Name, newNodeID, "ADMIN", "ADMIN")
+	sshContainer, err := startSSHPasswordServer(context.Background(), s.consoleNetwork.Name, newNodeID, "ADMIN", "ADMIN")
 	s.Require().NoError(err)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -202,10 +202,10 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 		}
 	}()
 
-	smdAPIURL, err := getSMDAPIURL(s.ctx, s.containers["smd"])
+	smdAPIURL, err := getSMDAPIURL(context.Background(), s.containers["smd"])
 	s.Require().NoError(err)
 
-	err = loadRedfishEndpoints(s.ctx, smdAPIURL, []redfishEndpoint{{
+	err = loadRedfishEndpoints(context.Background(), smdAPIURL, []redfishEndpoint{{
 		Host:     newNodeID,
 		Username: "ADMIN",
 		Password: "ADMIN",
@@ -215,12 +215,12 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 	// Clean up the Redfish endpoint at the end to avoid interfering with other tests
 	defer func() {
 		s.T().Logf("Removing Redfish endpoint %s", newNodeID)
-		smdAPIURL, err := getSMDAPIURL(s.ctx, s.containers["smd"])
+		smdAPIURL, err := getSMDAPIURL(context.Background(), s.containers["smd"])
 		if err != nil {
 			s.T().Errorf("Warning: failed to get SMD API URL: %v", err)
 			return
 		}
-		if err := deleteRedfishEndpoint(s.ctx, smdAPIURL, newNodeID); err != nil {
+		if err := deleteRedfishEndpoint(context.Background(), smdAPIURL, newNodeID); err != nil {
 			s.T().Logf("Warning: failed to remove Redfish endpoint %s: %v", newNodeID, err)
 		}
 	}()

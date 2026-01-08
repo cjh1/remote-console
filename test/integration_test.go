@@ -410,9 +410,8 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 	for {
 		_, message, err := wsConn.ReadMessage()
 		if err != nil {
-			// TODO this should be an error
 			s.T().Logf("WebSocket read ended: %v", err)
-			break
+			return output.String(), fmt.Errorf("websocket read error while searching for %q: %w", searchString, err)
 		}
 		msgStr := string(message)
 		s.T().Logf("Console: %s", msgStr)
@@ -421,7 +420,6 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 			return output.String(), nil
 		}
 	}
-	return output.String(), fmt.Errorf("string %q not found in output", searchString)
 }
 
 func (s *IntegrationTestSuite) readNWebSocketMessages(wsConn *websocket.Conn, count int, timeout time.Duration) (string, error) {

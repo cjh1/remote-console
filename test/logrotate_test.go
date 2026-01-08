@@ -21,7 +21,7 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	// Stop the default remote-console container so we don't have two instances fighting over ports
 	defaultRC, ok := s.containers["remote-console"]
 	s.Require().True(ok, "default remote-console container should exist")
-	stopCtx, cancelStop := context.WithTimeout(s.ctx, time.Minute)
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Minute)
 	defer cancelStop()
 	s.T().Log("Terminating default remote-console container for log rotation test...")
 	s.Require().NoError(defaultRC.Terminate(stopCtx), "failed to terminate default remote-console container")
@@ -34,12 +34,12 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	}
 
 	s.T().Log("Starting remote-console container with log rotation settings...")
-	logRotateRemoteConsoleContainer, err := startRemoteConsoleWithEnv(s.ctx, env, s.rcsNetwork.Name, s.consoleNetwork.Name)
+	logRotateRemoteConsoleContainer, err := startRemoteConsoleWithEnv(context.Background(), env, s.rcsNetwork.Name, s.consoleNetwork.Name)
 	if err != nil {
 		s.T().Logf("Failed to start remote-console container: %v", err)
 		// Try to get logs if the container was created but failed to start
 		if logRotateRemoteConsoleContainer != nil {
-			if logs, logErr := logRotateRemoteConsoleContainer.Logs(s.ctx); logErr == nil {
+			if logs, logErr := logRotateRemoteConsoleContainer.Logs(context.Background()); logErr == nil {
 				logBytes, _ := io.ReadAll(logs)
 				s.T().Logf("Container logs:\n%s", string(logBytes))
 			}
@@ -57,12 +57,12 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 
 		// Recreate the default remote-console container to avoid lingering state
 		s.T().Log("Recreating default remote-console container...")
-		rc, err := startRemoteConsole(s.ctx, s.rcsNetwork.Name, s.consoleNetwork.Name)
+		rc, err := startRemoteConsole(context.Background(), s.rcsNetwork.Name, s.consoleNetwork.Name)
 		s.Require().NoError(err, "failed to recreate default remote-console container")
 		s.containers["remote-console"] = rc
 
 		// Restore API URL
-		s.apiURL, err = s.getRemoteConsoleAPIURL(rc)
+		s.apiURL, err = s.getRemoteConsoleAPIURL(context.Background(), rc)
 		s.Require().NoError(err, "failed to get API URL of default remote-console container")
 
 		// Wait for it to discover consoles again
@@ -73,7 +73,7 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 	}()
 
 	// Update API URL to point to new container
-	s.apiURL, err = s.getRemoteConsoleAPIURL(logRotateRemoteConsoleContainer)
+	s.apiURL, err = s.getRemoteConsoleAPIURL(context.Background(), logRotateRemoteConsoleContainer)
 	s.Require().NoError(err)
 
 	// Wait for the new container to discover consoles
@@ -135,7 +135,7 @@ func (s *IntegrationTestSuite) TestConsoleLogRotation() {
 
 	// Check for current and rotated log files (conman uses /tmp/conman/ as base directory)
 	checkCmd := []string{"sh", "-c", "ls -la /tmp/conman/ /tmp/conman.old/ 2>&1"}
-	exitCode, reader, err := logRotateRemoteConsoleContainer.Exec(s.ctx, checkCmd)
+	exitCode, reader, err := logRotateRemoteConsoleContainer.Exec(context.Background(), checkCmd)
 	s.Require().NoError(err)
 	logOutput, err := io.ReadAll(reader)
 	s.Require().NoError(err)

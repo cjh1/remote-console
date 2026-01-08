@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sort"
@@ -80,7 +81,7 @@ func (s *IntegrationTestSuite) broadcastConsoleMessage(f consoleFixture, msg str
 	if len(cmd) == 0 {
 		return 0, "", fmt.Errorf("console %s does not support broadcasting", f.name)
 	}
-	exitCode, reader, err := container.Exec(s.ctx, cmd)
+	exitCode, reader, err := container.Exec(context.Background(), cmd)
 	if err != nil {
 		return exitCode, "", err
 	}
