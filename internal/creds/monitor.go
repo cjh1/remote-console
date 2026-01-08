@@ -49,7 +49,6 @@ func (cs *credsService) CheckForUpdates() (bool, error) {
 
 func (cs *credsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 	if cs.previousPasswords == nil {
-		fmt.Printf("No previous passwords stored, cannot check for changes\n")
 		return false, nil
 	}
 	currentPasswords, err := getPasswords(cs.config, xnames)

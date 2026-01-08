@@ -28,7 +28,6 @@ func command(config *remoteConsoleConfig) *cli.Command {
 		Usage:       "access remote consoles",
 		Description: "OpenCHAMI remote console service",
 		Before: func(ctx context.Context, c *cli.Command) (context.Context, error) {
-			fmt.Printf("Starting remote-console service...: %s\n", config.Conman.LogsPath)
 			config.SmdURL = ensureTrailingSlash(config.SmdURL)
 
 			return ctx, validateConfig(config)

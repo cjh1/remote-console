@@ -80,7 +80,6 @@ func (cts *consoleTailSession) waitForClientClose() {
 }
 
 func (cts *consoleTailSession) streamConsoleTail(follow bool) {
-	fmt.Printf("streamConsoleTail called for node: %s, follow=%v\n", cts.nodeID, follow)
 	// Read the lines of the tail output while looking for a cancel signal
 	for line := range cts.tail.Lines {
 		// Stream the line to the websocket
@@ -203,11 +202,6 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
 			seekOffset = currentPos
 
-			// If not following, we're done
-			if !follow {
-				fmt.Printf("Not following console log, ending session\n")
-				return
-			}
 		} else if errors.Is(err, os.ErrNotExist) {
 			slog.Warn("Console log not found; no history available", "filename", filename, "follow", follow, "nodeID", cts.nodeID)
 			if !follow {
@@ -250,8 +244,6 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	// The tail library will handle rotation: if file is reopened, it starts from beginning
 	// If the file hasn't been rotated, we continue from our saved offset
 
-	fmt.Printf("seekOffset=%d", seekOffset)
-
 	if numLines > 0 && follow && seekOffset > 0 {
 		conf.Location = &tail.SeekInfo{Offset: seekOffset, Whence: io.SeekStart}
 	}
@@ -279,13 +271,6 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
-
-	// Only allow 'GET' calls
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, fmt.Sprintf("(%s) Not Allowed", r.Method), http.StatusMethodNotAllowed)
-		return
-	}
 
 	nodeID, err := extractNodeId(w, r)
 	if err != nil {
@@ -322,8 +307,6 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	slog.Info("Starting console tail session for node", "nodeID", nodeID)
-	
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

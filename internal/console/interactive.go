@@ -405,16 +405,9 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
-	// Only allow 'GET' calls
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, fmt.Sprintf("(%s) Not Allowed", r.Method), http.StatusMethodNotAllowed)
-		return
-	}
-
 	nodeID, err := extractNodeId(w, r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -423,6 +416,8 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Node doesn't exists", http.StatusNotFound)
 		return
 	}
+
+	slog.Info("Starting interactive console session", "nodeID", nodeID)
 
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)

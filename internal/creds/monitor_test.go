@@ -34,7 +34,6 @@ func TestCheckIfPasswordsChanged(t *testing.T) {
 			"Xname":    node,
 			"URL":      "https://" + node + "/redfish/v1/Managers/BMC",
 		}
-		fmt.Printf("hms-creds/%s\n", node)
 		err = ss.Store(fmt.Sprintf("hms-creds/%s", node), value)
 		require.NoError(t, err)
 	}

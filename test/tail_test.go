@@ -12,7 +12,9 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 	for _, console := range consoleFixtureList() {
 		s.Run(console.name, func() {
 			// First, wait for the console to be ready
-			followURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
+			followParams := url.Values{}
+			followParams.Set("follow", "true")
+			followURL, err := s.tailWebSocketURL(console.nodeID, followParams)
 			s.Require().NoError(err)
 
 			followConn, followResp, err := s.dialWebSocket(followURL)
@@ -26,7 +28,7 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 			}
 
 			// Send a message to the console and verify it's seen in the tail
-			wsURL, err := s.tailWebSocketURL(console.nodeID, "")
+			wsURL, err := s.tailWebSocketURL(console.nodeID, nil)
 			msg := makeUnique("tail-basic" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
@@ -50,7 +52,9 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 func (s *IntegrationTestSuite) TestConsoleTailFollow() {
 	for _, console := range consoleFixtureList() {
 		s.Run(console.name, func() {
-			wsURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
+			params := url.Values{}
+			params.Set("follow", "true")
+			wsURL, err := s.tailWebSocketURL(console.nodeID, params)
 			s.Require().NoError(err)
 
 			wsConn, resp, err := s.dialWebSocket(wsURL)
@@ -77,7 +81,9 @@ func (s *IntegrationTestSuite) TestConsoleTailFollow() {
 func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
 	for _, console := range consoleFixtureList() {
 		s.Run(console.name, func() {
-			wsURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
+			params := url.Values{}
+			params.Set("follow", "true")
+			wsURL, err := s.tailWebSocketURL(console.nodeID, params)
 			s.Require().NoError(err)
 
 			firstConn, firstResp, err := s.dialWebSocket(wsURL)
@@ -115,9 +121,14 @@ func (s *IntegrationTestSuite) TestConsoleTailConcurrent() {
 func (s *IntegrationTestSuite) TestConsoleTailHistoryFollowConcurrent() {
 	for _, console := range consoleFixtureList() {
 		s.Run(console.name, func() {
-			historyURL, err := s.tailWebSocketURL(console.nodeID, "lines=50&follow=true")
+			historyParams := url.Values{}
+			historyParams.Set("lines", "50")
+			historyParams.Set("follow", "true")
+			historyURL, err := s.tailWebSocketURL(console.nodeID, historyParams)
 			s.Require().NoError(err)
-			followURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
+			followParams := url.Values{}
+			followParams.Set("follow", "true")
+			followURL, err := s.tailWebSocketURL(console.nodeID, followParams)
 			s.Require().NoError(err)
 
 			historyConn, historyResp, err := s.dialWebSocket(historyURL)
@@ -156,7 +167,9 @@ func (s *IntegrationTestSuite) TestConsoleTailLines() {
 	for _, console := range consoleFixtureList() {
 		s.Run(console.name, func() {
 			// First, wait for the console to be ready
-			followURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
+			followParams := url.Values{}
+			followParams.Set("follow", "true")
+			followURL, err := s.tailWebSocketURL(console.nodeID, followParams)
 			s.Require().NoError(err)
 
 			followConn, followResp, err := s.dialWebSocket(followURL)
@@ -175,7 +188,9 @@ func (s *IntegrationTestSuite) TestConsoleTailLines() {
 			s.Require().NoError(err)
 			s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
 
-			linesURL, err := s.tailWebSocketURL(console.nodeID, "lines=2")
+			params := url.Values{}
+			params.Set("lines", "2")
+			linesURL, err := s.tailWebSocketURL(console.nodeID, params)
 			s.Require().NoError(err)
 
 			wsConn, resp, err := s.dialWebSocket(linesURL)
@@ -195,7 +210,9 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 	for _, console := range consoleFixtureList() {
 		s.Run(console.name, func() {
 			// Use separate follow connection to ensure we get the initial message before the lines=1 connection
-			followURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
+			followParams := url.Values{}
+			followParams.Set("follow", "true")
+			followURL, err := s.tailWebSocketURL(console.nodeID, followParams)
 			s.Require().NoError(err)
 
 			followConn, followResp, err := s.dialWebSocket(followURL)
@@ -218,7 +235,10 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			s.Require().NoError(err, "follow connection did not see initial test message in output")
 
 			// Now use the lines=2&follow=true connection to ensure we get the initial message and then follow
-			linesFollowURL, err := s.tailWebSocketURL(console.nodeID, "lines=2&follow=true")
+			params := url.Values{}
+			params.Set("lines", "2")
+			params.Set("follow", "true")
+			linesFollowURL, err := s.tailWebSocketURL(console.nodeID, params)
 			s.Require().NoError(err)
 
 			followLinesConn, followLinesResp, err := s.dialWebSocket(linesFollowURL)
@@ -227,7 +247,6 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 			defer followLinesConn.Close()
 
 			tailOutput, err := s.readNWebSocketMessages(followLinesConn, 2, 30*time.Second)
-			fmt.Printf("tailOuput: %s", tailOutput)
 			s.Require().NoError(err, "follow lines connection did not see initial test message in output")
 			s.Require().Len(strings.Split(strings.TrimSpace(tailOutput), "\n"), 2, "Expected exactly two lines from tail with lines=2")
 			s.Require().Contains(tailOutput, msg, "Test message not found in console output")
@@ -249,11 +268,17 @@ func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
 
 	// Try to tail a non-existent node
 	invalidNodeID := "x9c9s9b9"
+	
+	params := url.Values{}
+	params.Set("mode", "tail")
+	
 	wsURL := url.URL{
 		Scheme: "ws",
 		Host:   parsedURL.Host,
-		Path:   fmt.Sprintf("/remote-console/consoles/%s/tail", invalidNodeID),
+		Path:   fmt.Sprintf("/remote-console/consoles/%s", invalidNodeID),
+		RawQuery: params.Encode(),
 	}
+	
 	_, resp, err := s.dialWebSocket(wsURL)
 
 	// Should get an error because the WebSocket upgrade should fail with 404

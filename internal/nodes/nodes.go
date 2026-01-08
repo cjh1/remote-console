@@ -305,8 +305,6 @@ func updateNodes(nodes []NodeConsoleInfo) bool {
 		}
 	}
 
-	fmt.Printf("updateNodes: updated current nodes: %v\n", changed)
-
 	return changed
 }
 

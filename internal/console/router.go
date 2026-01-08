@@ -25,6 +25,7 @@
 package console
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -43,6 +44,24 @@ var upgrader = websocket.Upgrader{
 		// No need for Origin checking since this is for CLI clients
 		return true
 	},
+}
+
+// doConsole dispatches to either interactive or tail mode based on the mode query parameter
+func doConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
+	// Parse mode parameter (defaults to "interactive")
+	params := r.URL.Query()
+	mode := params.Get("mode")
+	if mode == "" {
+		mode = "interactive"
+	}
+
+	if mode == "tail" {
+		doTailConsole(consoleLogsPath, w, r)
+	} else if mode == "interactive" {
+		doInteractiveConsole(w, r)
+	} else {
+		http.Error(w, fmt.Sprintf("Invalid mode parameter: %s (must be 'interactive' or 'tail')", mode), http.StatusBadRequest)
+	}
 }
 
 func SetupRoutes(consoleLogsPath string) *chi.Mux {
@@ -69,10 +88,9 @@ func SetupRoutes(consoleLogsPath string) *chi.Mux {
 		}
 
 		r.Get("/remote-console/consoles", doConsoles)
-		r.Get("/remote-console/consoles/{nodeID}/tail", func(w http.ResponseWriter, r *http.Request) {
-			doTailConsole(consoleLogsPath, w, r)
+		r.Get("/remote-console/consoles/{nodeID}", func(w http.ResponseWriter, r *http.Request) {
+			doConsole(consoleLogsPath, w, r)
 		})
-		r.Get("/remote-console/consoles/{nodeID}", doInteractiveConsole)
 	})
 
 	// debug only routes

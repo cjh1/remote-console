@@ -258,8 +258,6 @@ func startRedfishEmulator(ctx context.Context, network string, xname string, moc
 		return nil, fmt.Errorf("unable to determine absolute path for mocks directory: %w", err)
 	}
 
-	fmt.Printf("Using mocks directory: %s\n", mocksDirectory)
-
 	req := testcontainers.ContainerRequest{
 		Image:    "ghcr.io/openchami/csm-rie:v1.6.7",
 		Hostname: xname,

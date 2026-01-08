@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -80,7 +81,9 @@ func (s *IntegrationTestSuite) TestLogAggregation() {
 	consoles := []consoleFixture{consoleFixtures["ssh-password"]}
 
 	for _, console := range consoles {
-		followURL, err := s.tailWebSocketURL(console.nodeID, "follow=true")
+		params := url.Values{}
+		params.Set("follow", "true")
+		followURL, err := s.tailWebSocketURL(console.nodeID, params)
 		s.Require().NoError(err)
 
 		tailConn, tailResp, err := s.dialWebSocket(followURL)
