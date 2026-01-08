@@ -202,6 +202,15 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 
 			seekOffset = currentPos
 
+			// If not following, we're done after sending the last N lines
+			if !follow {
+				slog.Info("Not following console log, ending session", "nodeID", cts.nodeID)
+				cts.ws.Write(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				cts.close()
+				return
+			}
+
 		} else if errors.Is(err, os.ErrNotExist) {
 			slog.Warn("Console log not found; no history available", "filename", filename, "follow", follow, "nodeID", cts.nodeID)
 			if !follow {

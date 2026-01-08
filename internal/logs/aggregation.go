@@ -32,6 +32,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/nxadm/tail"
 
@@ -100,6 +101,9 @@ func (ls *logsService) writeToAggLog(xname, line string) {
 	if ls.conAggLogger == nil {
 		return
 	}
+
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	ls.conAggLogger.Printf("%s [%s] %s", timestamp, xname, line)
 }
 
 func (ls *logsService) openAggLogLocked() {

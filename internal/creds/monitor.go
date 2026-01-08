@@ -6,7 +6,6 @@
 package creds
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
