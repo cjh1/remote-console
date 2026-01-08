@@ -60,7 +60,6 @@ func (s *IntegrationTestSuite) connectInteractiveConsole(nodeID string, prompt s
 	var lastErr error
 
 	// We try multiple times to connect to the console, as it may take a bit for conmand to be available.
-	// TODO we should update this to be more deterministic way to know when the console is ready.
 	for attempt := 1; attempt <= consoleConnectAttempts; attempt++ {
 		s.T().Logf("Connecting to console %s (attempt %d/%d)", nodeID, attempt, consoleConnectAttempts)
 

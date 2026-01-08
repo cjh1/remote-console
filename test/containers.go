@@ -409,17 +409,17 @@ func startSSHKeyServer(ctx context.Context, network string, alias string, userna
 	})
 }
 
-// startIPMIServer starts an IPMI server TODO alias => hostname
-func startIPMIServer(ctx context.Context, network string, alias string) (testcontainers.Container, error) {
+// startIPMIServer starts an IPMI server
+func startIPMIServer(ctx context.Context, network string, hostname string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
 			Context:    "../ipmi_sim",
 			Dockerfile: "Dockerfile",
 		},
-		Hostname: alias,
+		Hostname: hostname,
 		Networks: []string{network},
 		NetworkAliases: map[string][]string{
-			network: {alias},
+			network: {hostname},
 		},
 		ExposedPorts: []string{"623/udp"},
 		WaitingFor:   wait.ForLog("Opened UDP port 623").WithStartupTimeout(30 * time.Second),

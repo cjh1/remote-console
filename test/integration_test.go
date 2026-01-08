@@ -632,9 +632,15 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 	s.Require().NoError(err, "failed to remove dynamic Redfish endpoint")
 	s.Require().NoError(s.waitForConsoleRemoval(newNodeID, 3*time.Minute), "remote-console did not drop dynamic console")
 
-	// Try to connect again, should fail
-	// TODO main this fail faster, we probably don't need to do the retries here
-	_, resp, err = s.connectInteractiveConsole(newNodeID, ":~$ ", 30*time.Second)
+	// Try to connect again, should fail immediately (no retries needed)
+	parsedURL, err := url.Parse(s.apiURL)
+	s.Require().NoError(err)
+	wsURL := url.URL{
+		Scheme: "ws",
+		Host:   parsedURL.Host,
+		Path:   fmt.Sprintf("/remote-console/consoles/%s", newNodeID),
+	}
+	_, resp, err = s.dialWebSocket(wsURL)
 	s.Require().Error(err, "Expected error connecting to removed console")
 	if resp != nil {
 		s.T().Logf("Console removal connection response status: %d", resp.StatusCode)
