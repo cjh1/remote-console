@@ -278,7 +278,10 @@ func updateNodes(nodes []NodeConsoleInfo) bool {
 
 	for id, nci := range nodesByID {
 		existing, ok := currentNodes[id]
-		if !ok || (existing != nil && *existing != nci) {
+		isNew := !ok
+		isNil := ok && existing == nil
+		isUpdated := ok && existing != nil && *existing != nci
+		if isNew || isNil || isUpdated {
 			nciCopy := nci
 			currentNodes[id] = &nciCopy
 			changed = true
