@@ -207,7 +207,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 				slog.Info("Not following console log, ending session", "nodeID", cts.nodeID)
 				cts.ws.Write(websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-				cts.close()
+
 				return
 			}
 
@@ -219,8 +219,6 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 				if err != nil {
 					slog.Error("Failed to send close message", "error", err, "nodeID", cts.nodeID)
 				}
-				
-				cts.close()
 				return
 			}
 		} else {
