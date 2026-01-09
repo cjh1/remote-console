@@ -34,7 +34,8 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 			s.Require().NoError(err)
 			s.T().Logf("%s console echo to pts (exit code %d): %s", console.name, exitCode, output)
 
-			s.readWebSocketUntil(followConn, msg, tailMessageTimeout)
+			_, err = s.readWebSocketUntil(followConn, msg, tailMessageTimeout)
+			s.Require().NoError(err, "Expected to find '%s' in follow console output", msg)
 
 			// Now, connect to the console and verify we can read the message
 			wsConn, resp, err := s.dialWebSocket(wsURL)
