@@ -260,48 +260,28 @@ func currentNodesFromSMD(ctx context.Context, httpClient *http.Client, smdURL st
 }
 
 func updateNodes(nodes []NodeConsoleInfo) bool {
-	changed := false
-	// compare with current nodes
-
 	currNodesMutex.Lock()
 	defer currNodesMutex.Unlock()
 
-	new_nodes := make(map[string]*NodeConsoleInfo)
-	names_map := make(map[string]bool)
-	for name, _ := range currentNodes {
-		names_map[name] = true
-	}
-
+	changed := false
+	nodesByID := make(map[string]NodeConsoleInfo, len(nodes))
 	for _, nci := range nodes {
-		//accumulate data for missing nodes to delete
-		delete(names_map, nci.ID)
+		nodesByID[nci.ID] = nci
+	}
 
-		curr_nci, present := currentNodes[nci.ID]
-		if !present {
-			//
-			new_nodes[nci.ID] = &nci
-		} else {
-			if *curr_nci != nci {
-				// something about the info has changed so we
-				// probably need to update.  we could refine this,
-				// but I imagine it almost never happens
-				changed = true
-				currentNodes[nci.ID] = &nci
-			}
+	for id := range currentNodes {
+		if _, ok := nodesByID[id]; !ok {
+			delete(currentNodes, id)
+			changed = true
 		}
 	}
 
-	if len(names_map) != 0 {
-		changed = true
-		for name, _ := range names_map {
-			delete(currentNodes, name)
-		}
-	}
-
-	if len(new_nodes) != 0 {
-		changed = true
-		for name, nci := range new_nodes {
-			currentNodes[name] = nci
+	for id, nci := range nodesByID {
+		existing, ok := currentNodes[id]
+		if !ok || (existing != nil && *existing != nci) {
+			nciCopy := nci
+			currentNodes[id] = &nciCopy
+			changed = true
 		}
 	}
 

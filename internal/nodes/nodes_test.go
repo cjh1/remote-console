@@ -6,44 +6,149 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUpdateNodes(t *testing.T) {
+func resetCurrentNodes() {
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+	currentNodes = make(map[string]*NodeConsoleInfo)
+}
+
+func TestUpdateNodesAdd(t *testing.T) {
+	resetCurrentNodes()
+
 	newNodes := []NodeConsoleInfo{
-		{ID: "x0c0s1b0"},
-		{ID: "x0c0s1b1"},
+		{
+			ID:             "x0c0s1b0",
+			ConnectionType: SSH,
+			ConnectionHost: "x0c0s1b0",
+			ConnectionPort: 22,
+		},
+		{
+			ID:             "x0c0s1b2",
+			ConnectionType: IPMI,
+			ConnectionHost: "x0c0s1b2",
+			ConnectionPort: 623,
+		},
 	}
 
-	updateNodes(newNodes)
+	changed := updateNodes(newNodes)
+	require.True(t, changed, "expected changes when nodes are added")
 
-	// Verify that the nodes were updated correctly
-	currentNodes := CurrentNodes()
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
 	require.Equal(t, 2, len(currentNodes), "There should be 2 nodes after update")
-	require.Contains(t, currentNodes, "x0c0s1b0", "Node x0c0s1b0 should be present")
-	require.Contains(t, currentNodes, "x0c0s1b1", "Node x0c0s1b1 should be present")
+	require.Contains(t, currentNodes, "x0c0s1b0")
+	require.Contains(t, currentNodes, "x0c0s1b2")
+	require.Equal(t, "x0c0s1b0", currentNodes["x0c0s1b0"].ConnectionHost)
+	require.Equal(t, 22, currentNodes["x0c0s1b0"].ConnectionPort)
+}
 
-	// Remove one node and update again
-	newNodes = []NodeConsoleInfo{
-		{ID: "x0c0s1b0"},
+func TestUpdateNodesUpdate(t *testing.T) {
+	resetCurrentNodes()
+
+	currNodesMutex.Lock()
+	currentNodes["x0c0s1b0"] = &NodeConsoleInfo{
+		ID:             "x0c0s1b0",
+		ConnectionType: SSH,
+		ConnectionHost: "x0c0s1b0",
+		ConnectionPort: 22,
+	}
+	currNodesMutex.Unlock()
+
+	newNodes := []NodeConsoleInfo{
+		{
+			ID:             "x0c0s1b0",
+			ConnectionType: SSH,
+			ConnectionHost: "x0c0s1b0",
+			ConnectionPort: 2222,
+		},
 	}
 
-	updateNodes(newNodes)
+	changed := updateNodes(newNodes)
+	require.True(t, changed, "expected changes when nodes are updated")
 
-	// Verify that the nodes were updated correctly
-	currentNodes = CurrentNodes()
-	require.Equal(t, 1, len(currentNodes), "There should be 1 node after update")
-	require.Contains(t, currentNodes, "x0c0s1b0", "Node x0c0s1b0 should be present")
-	require.NotContains(t, currentNodes, "x0c0s1b1", "Node x0c0s1b1 should not be present")
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+	require.Equal(t, 1, len(currentNodes))
+	require.Equal(t, "x0c0s1b0", currentNodes["x0c0s1b0"].ConnectionHost)
+	require.Equal(t, 2222, currentNodes["x0c0s1b0"].ConnectionPort)
+}
 
-	// Add a new node and update again
-	newNodes = []NodeConsoleInfo{
-		{ID: "x0c0s1b0"},
-		{ID: "x0c0s1b2"},
+func TestUpdateNodesRemove(t *testing.T) {
+	resetCurrentNodes()
+
+	currNodesMutex.Lock()
+	currentNodes["x0c0s1b0"] = &NodeConsoleInfo{
+		ID:             "x0c0s1b0",
+		ConnectionType: SSH,
+		ConnectionHost: "x0c0s1b0",
+		ConnectionPort: 22,
+	}
+	currentNodes["x0c0s1b1"] = &NodeConsoleInfo{
+		ID:             "x0c0s1b1",
+		ConnectionType: IPMI,
+		ConnectionHost: "x0c0s1b1",
+		ConnectionPort: 623,
+	}
+	currNodesMutex.Unlock()
+
+	newNodes := []NodeConsoleInfo{
+		{
+			ID:             "x0c0s1b0",
+			ConnectionType: SSH,
+			ConnectionHost: "x0c0s1b0",
+			ConnectionPort: 22,
+		},
 	}
 
-	updateNodes(newNodes)
+	changed := updateNodes(newNodes)
+	require.True(t, changed, "expected changes when nodes are removed")
 
-	// Verify that the nodes were updated correctly
-	currentNodes = CurrentNodes()
-	require.Equal(t, 2, len(currentNodes), "There should be 2 nodes after update")
-	require.Contains(t, currentNodes, "x0c0s1b0", "Node x0c0s1b0 should be present")
-	require.Contains(t, currentNodes, "x0c0s1b2", "Node x0c0s1b2 should be present")
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+	require.Equal(t, 1, len(currentNodes))
+	require.Contains(t, currentNodes, "x0c0s1b0")
+	require.NotContains(t, currentNodes, "x0c0s1b1")
+}
+
+func TestUpdateNodesNoChange(t *testing.T) {
+	resetCurrentNodes()
+
+	currNodesMutex.Lock()
+	currentNodes["x0c0s1b0"] = &NodeConsoleInfo{
+		ID:             "x0c0s1b0",
+		ConnectionType: SSH,
+		ConnectionHost: "x0c0s1b0",
+		ConnectionPort: 22,
+	}
+	currentNodes["x0c0s1b1"] = &NodeConsoleInfo{
+		ID:             "x0c0s1b1",
+		ConnectionType: IPMI,
+		ConnectionHost: "x0c0s1b1",
+		ConnectionPort: 623,
+	}
+	currNodesMutex.Unlock()
+
+	newNodes := []NodeConsoleInfo{
+		{
+			ID:             "x0c0s1b0",
+			ConnectionType: SSH,
+			ConnectionHost: "x0c0s1b0",
+			ConnectionPort: 22,
+		},
+		{
+			ID:             "x0c0s1b1",
+			ConnectionType: IPMI,
+			ConnectionHost: "x0c0s1b1",
+			ConnectionPort: 623,
+		},
+	}
+
+	changed := updateNodes(newNodes)
+	require.False(t, changed, "expected no changes when data is identical")
+
+	currNodesMutex.Lock()
+	defer currNodesMutex.Unlock()
+	require.Equal(t, 2, len(currentNodes))
+	require.Contains(t, currentNodes, "x0c0s1b0")
+	require.Contains(t, currentNodes, "x0c0s1b1")
 }
