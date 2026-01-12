@@ -35,7 +35,7 @@ func newConsoleTailSession(ctx context.Context, consoleLogsPath string, nodeID s
 		rateLimiter:     ratelimiter.NewLeakyBucket(rateLimitBurstKB, rateLimitInterval),
 	}
 
-	cts.ws = NewWebSocketSession(conn, fmt.Sprintf("tail session %s", nodeID), cts.close)
+	cts.ws = NewWebSocketSession(conn, fmt.Sprintf("tail session %s", nodeID))
 	cts.ws.Start()
 
 	return cts
@@ -82,6 +82,14 @@ func (cts *consoleTailSession) waitForClientClose() {
 func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 	// Read the lines of the tail output while looking for a cancel signal
 	for line := range cts.tail.Lines {
+		// Check if websocket has closed
+		select {
+		case <-cts.ws.Done():
+			slog.Debug("WebSocket closed, stopping tail", "nodeID", cts.nodeID)
+			return
+		default:
+		}
+
 		// Stream the line to the websocket
 		if line == nil {
 			slog.Info("Tailing console complete", "nodeID", cts.nodeID, "follow", follow)

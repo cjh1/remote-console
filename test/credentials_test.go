@@ -40,6 +40,11 @@ func (s *IntegrationTestSuite) TestConsoleCredentialRefresh() {
 	s.T().Log("Setting invalid credentials to trigger authentication failure")
 	s.Require().NoError(setConsoleCredentials(context.Background(), s.vaultContainer, nodeID, username, invalidPassword))
 
+	// Wait for credential monitor to detect the change.
+	// RCS_CREDS_MONITOR_INTERVAL is 10 seconds, so wait a bit longer to ensure detection.
+	s.T().Log("Waiting for credential monitor to detect change...")
+	time.Sleep(15 * time.Second)
+
 	// SSH returns "Permission denied, please try again." when password auth fails.
 	authOutput, err := s.readWebSocketUntil(wsConn, "Permission denied", 2*time.Minute)
 	s.Require().NoError(err, "expected authentication error after credentials were set incorrectly")
@@ -47,6 +52,11 @@ func (s *IntegrationTestSuite) TestConsoleCredentialRefresh() {
 
 	s.T().Log("Restoring valid credentials")
 	s.Require().NoError(setConsoleCredentials(context.Background(), s.vaultContainer, nodeID, username, correctPassword))
+
+	// Wait for credential monitor to detect the restored credentials.
+	// RCS_CREDS_MONITOR_INTERVAL is 10 seconds, so wait a bit longer to ensure detection.
+	s.T().Log("Waiting for credential monitor to detect restored credentials...")
+	time.Sleep(15 * time.Second)
 
 	reconnectMarker := fmt.Sprintf("<ConMan> Connection to console [%s] opened", nodeID)
 	reconnectOutput, err := s.readWebSocketUntil(wsConn, reconnectMarker, 2*time.Minute)

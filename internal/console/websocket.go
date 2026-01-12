@@ -26,10 +26,9 @@ type webSocketSession struct {
 	name       string
 	ctx        context.Context // cancelled when the session is closed
 	cancel     context.CancelFunc
-	onClose    func() // called when the session is closed, used to inform owners of the session that it is closed
 }
 
-func NewWebSocketSession(conn *websocket.Conn, name string, onClose func()) *webSocketSession {
+func NewWebSocketSession(conn *websocket.Conn, name string) *webSocketSession {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &webSocketSession{
 		conn:       conn,
@@ -37,7 +36,6 @@ func NewWebSocketSession(conn *websocket.Conn, name string, onClose func()) *web
 		ctx:        ctx,
 		cancel: cancel,
 		name:       name,
-		onClose:    onClose,
 	}
 }
 
@@ -91,7 +89,6 @@ func (ws *webSocketSession) writePump() {
                 slog.Error("WebSocket write failed", "name", ws.name, "error", err)
                 // Connection broken, close channels immediately (can't drain)
 				ws.cancel()
-				ws.handleClose()
 				return
             }
 		case <-ticker.C:
@@ -100,7 +97,6 @@ func (ws *webSocketSession) writePump() {
                 slog.Error("WebSocket ping failed", "name", ws.name, "error", err)
                 // Connection broken, close channels immediately (can't drain)
 				ws.cancel()
-				ws.handleClose()
 				return
             }
 		case <-ws.ctx.Done():
@@ -122,8 +118,8 @@ func (ws *webSocketSession) writePump() {
 	}
 }
 
-func (ws *webSocketSession) handleClose() {
-	if ws.onClose != nil {
-		ws.onClose()
-	}
+// Done returns a channel that's closed when the websocket session is closed.
+// This allows parent sessions to detect when the websocket has closed.
+func (ws *webSocketSession) Done() <-chan struct{} {
+	return ws.ctx.Done()
 }

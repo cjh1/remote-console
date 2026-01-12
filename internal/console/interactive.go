@@ -268,6 +268,10 @@ func (s *interactiveConsoleSession) streamOutput() {
 	case <-s.ctx.Done():
 		slog.Debug("Session closing, streamOutput exiting for console", "nodeID", s.nodeID, "error", s.ctx.Err())
 		return
+	case <-s.ws.Done():
+		slog.Debug("WebSocket closed, streamOutput exiting for console", "nodeID", s.nodeID)
+		s.Close()
+		return
 	default:
 	}
 
@@ -384,7 +388,7 @@ func NewInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interact
 
 	}
 
-	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID), session.Close)
+	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID))
 	session.ws.Start()
 
 	// Start conman process with PTY
