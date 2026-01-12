@@ -31,7 +31,7 @@ type interactiveConsoleSession struct {
 
 	ws            *webSocketSession
 	rateLimiter   *ratelimiter.LeakyBucket // Rate limit console output
-	wg            sync.WaitGroup           // Tracks all I/O goroutines including reconnected ones
+	wg            sync.WaitGroup           // Tracks all goroutines including reconnected ones
 	processExited chan struct{}            // Closed when current conman process exits
 }
 
@@ -110,7 +110,6 @@ func (s *interactiveConsoleSession) monitorProcess() {
 			return
 		default:
 		}
-		// Continue monitoring (either succeeded or will retry on next exit)
 	}
 }
 
@@ -162,7 +161,7 @@ func (s *interactiveConsoleSession) reconnect() {
 	}
 	s.ptmxMutex.Unlock()
 
-	// Try to start conman once
+	// Try to start conman again
 	slog.Info("Attempting to reconnect conman", "nodeID", s.nodeID)
 	
 	if err := s.startConmanProcess(); err != nil {
@@ -198,18 +197,6 @@ func isEIO(err error) bool {
 // streamOutput reads from PTY and writes to WebSocket
 func (s *interactiveConsoleSession) streamOutput() {
 	defer s.wg.Done()
-
-	// Check if session is closing before starting
-	select {
-	case <-s.ctx.Done():
-		slog.Debug("Session closing, streamOutput exiting for console", "nodeID", s.nodeID, "error", s.ctx.Err())
-		return
-	case <-s.ws.Done():
-		slog.Debug("WebSocket closed, streamOutput exiting for console", "nodeID", s.nodeID)
-		s.Close()
-		return
-	default:
-	}
 
 	buf := make([]byte, 4096)
 	for {
