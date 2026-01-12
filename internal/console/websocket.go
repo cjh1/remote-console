@@ -79,6 +79,7 @@ func (ws *webSocketSession) writePump() {
 
 	for {
 		select {
+		// Handle outbound messages
 		case msg, ok := <-ws.send:
             ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
             if !ok {
@@ -91,6 +92,7 @@ func (ws *webSocketSession) writePump() {
 				ws.cancel()
 				return
             }
+		// Handle periodic ping
 		case <-ticker.C:
 			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
             if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -99,6 +101,7 @@ func (ws *webSocketSession) writePump() {
 				ws.cancel()
 				return
             }
+		
 		case <-ws.ctx.Done():
 			for {
 				select {

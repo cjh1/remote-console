@@ -126,22 +126,21 @@ func (cs *credsService) GetPasswordsWithRetries(ctx context.Context, bmcXNames [
 }
 
 func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
-	var ss sstorage.SecureStorage = nil
-	var err error = nil
-	switch config.SecureStorageAdapter {
-	case StorageAdapterVault:
+	var ss sstorage.SecureStorage
+	var err error
+	
+	if config.SecureStorageAdapter == StorageAdapterVault {
 		ss, err = sstorage.NewVaultAdapterAs(config.VaultBasePath, config.VaultRole)
 		if err != nil {
 			return nil, fmt.Errorf("unable to create vault secure storage adapter: %#v\n", err)
 		}
-	case StorageAdapterLocal:
+	} else if config.SecureStorageAdapter == StorageAdapterLocal {
 		ss, err = sstorage.NewLocalSecretStore(config.LocalStoreKey, config.LocalStoreFilePath, false)
 		if err != nil {
 			return nil, fmt.Errorf("unable to create local file secure storage adapter: %#v\n", err)
 		}
-	default:
+	} else {
 		return nil, fmt.Errorf("invalid secure storage adapter type: %s\n", config.SecureStorageAdapter)
-
 	}
 
 	return ss, nil

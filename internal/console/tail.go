@@ -134,6 +134,7 @@ func readLastNLines(filename string, numLines int) ([]string, int64, error) {
 	}
 	defer file.Close()
 
+	// Use a ring buffer to store the last numLines lines
 	r := ring.New(numLines)
 	count := 0
 
@@ -194,8 +195,8 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 			for _, line := range lines {
 				lineText := line + "\n"
 				
-			// Apply rate limiting (convert bytes to KB, rounded up)
-			kb := uint16((len(lineText) + 1023) / 1024)
+				// Apply rate limiting (convert bytes to KB, rounded up)
+				kb := uint16((len(lineText) + 1023) / 1024)
 				for !cts.rateLimiter.Pour(kb) {
 					slog.Debug("Rate limit reached for tail (history), waiting for capacity", "nodeID", cts.nodeID)
 					time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
@@ -244,7 +245,7 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		}
 	}
 
-	// Configuration for tail function
+	// Configuration for tail 
 	conf := tail.Config{
 		Follow:      follow,
 		MustExist:   false, // If file doesn't exist keep trying

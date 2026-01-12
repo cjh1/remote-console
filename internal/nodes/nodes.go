@@ -167,23 +167,21 @@ func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo
 		return nil
 	}
 
-	switch {
-	case sc.SSH != nil && sc.SSH.ServiceEnabled:
+	if sc.SSH != nil && sc.SSH.ServiceEnabled {
 		return &NodeConsoleInfo{
 			ID:             endpoint.ID,
 			ConnectionType: SSH,
 			ConnectionHost: endpoint.RedfishEndpointFQDN,
 			ConnectionPort: sc.SSH.Port,
 		}
-	case sc.IPMI != nil && sc.IPMI.ServiceEnabled:
+	} else if sc.IPMI != nil && sc.IPMI.ServiceEnabled {
 		return &NodeConsoleInfo{
 			ID:             endpoint.ID,
 			ConnectionType: IPMI,
 			ConnectionHost: endpoint.RedfishEndpointFQDN,
 			ConnectionPort: sc.IPMI.Port,
 		}
-
-	case sc.Telnet != nil && sc.Telnet.ServiceEnabled || sc.WebSocket != nil && sc.WebSocket.ServiceEnabled:
+	} else if sc.Telnet != nil && sc.Telnet.ServiceEnabled || sc.WebSocket != nil && sc.WebSocket.ServiceEnabled {
 		slog.Warn("telnet and websocket not supported", "nodeID", endpoint.ID)
 	}
 
@@ -202,20 +200,20 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 	}
 
 	for _, ct := range cs.ConnectTypesSupported {
-		switch strings.ToLower(ct) {
-		case SSH:
+		ctLower := strings.ToLower(ct)
+		if ctLower == SSH {
 			return &NodeConsoleInfo{
 				ID:             endpoint.ID,
 				ConnectionType: SSH,
 				ConnectionHost: endpoint.RedfishEndpointFQDN,
 			}
-		case IPMI:
+		} else if ctLower == IPMI {
 			return &NodeConsoleInfo{
 				ID:             endpoint.ID,
 				ConnectionType: IPMI,
 				ConnectionHost: endpoint.RedfishEndpointFQDN,
 			}
-		default:
+		} else {
 			slog.Error("unsupported connection type", "type", ct, "nodeID", endpoint.ID)
 		}
 	}
@@ -223,7 +221,7 @@ func commandShellToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo 
 	return nil
 }
 
-// GetCurrentNodesFromHSM queries HSM for all node information and returns a slice of NodeConsoleInfo
+// currentNodesFromSMD queries HSM for all node information and returns a slice of NodeConsoleInfo
 func currentNodesFromSMD(ctx context.Context, httpClient *http.Client, smdURL string) (nodes []NodeConsoleInfo, err error) {
 
 	slog.Info("Starting to get current nodes on the system")
@@ -326,28 +324,6 @@ func CurrentNodes() map[string]*NodeConsoleInfo {
 
 	fmt.Println("CurrentNodes: returning copy of current nodes")
 	return nodesCopy
-}
-
-// Function to release the node from being monitored
-func releaseNode(xname string, stopTailing func(string)) bool {
-	currNodesMutex.Lock()
-	defer currNodesMutex.Unlock()
-	// NOTE: called during heartbeat thread
-
-	// This will remove it from the list of current nodes and stop tailing the
-	// log file.
-	found := false
-	if _, ok := currentNodes[xname]; ok {
-		delete(currentNodes, xname)
-		found = true
-	}
-
-	// remove the tail process for this file
-	if stopTailing != nil {
-		stopTailing(xname)
-	}
-
-	return found
 }
 
 func IsCurrentNode(nodeID string) bool {
