@@ -84,14 +84,15 @@ func (s *interactiveConsoleSession) monitorProcess() {
 		<-s.processExited
 		slog.Info("Conman process exited for console", "nodeID", s.nodeID)
 		
-		// Check if session is closing
+		// Wait before reconnecting to prevent tight loop
 		select {
+		case <-time.After(time.Second):
+			// Continue to reconnection
 		case <-s.ctx.Done():
-			slog.Info("Session closing, stopping monitor for console", "nodeID", s.nodeID)
+			slog.Info("Session closing during reconnect delay, stopping monitor for console", "nodeID", s.nodeID)
 			return
-		default:
 		}
-			
+		
 		// Check if the node still exists (might have been updated/changed)
 		if !validateNode(s.nodeID) {
 			slog.Info("Node no longer exists, closing session", "nodeID", s.nodeID)
@@ -100,11 +101,16 @@ func (s *interactiveConsoleSession) monitorProcess() {
 		}
 		
 		slog.Info("Node still exists, attempting to reconnect", "nodeID", s.nodeID)
-		if !s.reconnect() {
-			// Reconnection failed or was cancelled
+		s.reconnect()
+		
+		// Check if session is closing after reconnect attempt
+		select {
+		case <-s.ctx.Done():
+			slog.Info("Session closing after reconnect, stopping monitor for console", "nodeID", s.nodeID)
 			return
+		default:
 		}
-		// Successfully reconnected, loop back to monitor the new process
+		// Continue monitoring (either succeeded or will retry on next exit)
 	}
 }
 
@@ -136,50 +142,17 @@ func (s *interactiveConsoleSession) startConmanProcess() error {
 	}()
 
 	return nil
-
-	// // Wait briefly to see if process exits immediately (connection failure)
-	// time.Sleep(500 * time.Millisecond)
-	
-	// select {
-	// case <-s.processExit:
-	// 	msg := "conman process exited immediately"
-	// 	// Process exited - read any output to include in error
-	// 	buf := make([]byte, 4096)
-	// 	n, _ := ptmx.Read(buf)
-	// 	if n > 0 {
-	// 		output := strings.TrimSpace(string(buf[:n]))
-	// 		msg = fmt.Sprintf("%s: %s", msg, output)
-	// 	}
-	// 	ptmx.Close()
-	// 	return errors.New(msg)
-	// default:
-	// 	// Process is still running - now safe to expose PTY to other goroutines
-	// 	s.ptmxMutex.Lock()
-	// 	s.ptmx = ptmx
-	// 	s.ptmxMutex.Unlock()
-	// 	return nil
-	// }
 }
 
 // reconnect attempts to restart the conman process and reconnect streams
-// Returns true if reconnection succeeded, false if it failed or was cancelled
-func (s *interactiveConsoleSession) reconnect() bool {
-	// Check if context is already cancelled
-	select {
-	case <-s.ctx.Done():
-		slog.Info("Context cancelled before reconnection", "nodeID", s.nodeID, "error", s.ctx.Err())
-		s.Close()
-		return false
-	default:
-	}
-	
+// Logs errors but does not fail - monitorProcess will retry on next process exit
+func (s *interactiveConsoleSession) reconnect() {
 	// Notify user via WebSocket
 	reconnectMsg := fmt.Sprintf("\n[Reconnecting to %s...]\n", s.nodeID)
 	err := s.ws.Write(websocket.TextMessage, []byte(reconnectMsg))
 	if err != nil {
 		slog.Warn("Failed to send reconnect message", "nodeID", s.nodeID, "error", err)
-		s.Close()
-		return false
+		return
 	}
 
 	// Close old PTY if it exists
@@ -189,61 +162,24 @@ func (s *interactiveConsoleSession) reconnect() bool {
 	}
 	s.ptmxMutex.Unlock()
 
-	// Try to start conman with retries over 30 seconds
-	timeout := time.After(30 * time.Second)
-	retryDelay := time.Second
-	attempt := 0
+	// Try to start conman once
+	slog.Info("Attempting to reconnect conman", "nodeID", s.nodeID)
 	
-	for {
-		attempt++
-		slog.Info("Attempting to reconnect conman", "nodeID", s.nodeID, "attempt", attempt)
-		
-		if err := s.startConmanProcess(); err == nil {
-			// Success!
-			slog.Info("Successfully reconnected conman for console", "nodeID", s.nodeID)
-			
-			// Check if we are closed (double-check right before starting goroutine)
-			select {
-			case <-s.ctx.Done():
-				slog.Info("Context cancelled after reconnection", "nodeID", s.nodeID, "error", s.ctx.Err())
-				s.Close()
-				return false
-			default:
-			}
-
-			// Restart output streaming
-			// The console output itself will indicate when we're truly connected
-			// Track this new goroutine in the main WaitGroup
-			s.wg.Add(1)
-			go s.streamOutput()
-			// Note: streamInput is already running and will continue to work with the new PTY
-			
-			// Return true - monitorProcess will continue monitoring this new process
-			return true
-		} else {
-			slog.Warn("Failed to start conman", "nodeID", s.nodeID, "attempt", attempt, "error", err)
-		}
-		
-		// Wait before retry, checking for timeout
-		select {
-		case <-timeout:
-			slog.Warn("Reconnection timeout", "nodeID", s.nodeID, "attempts", attempt)
-			errorMsg := fmt.Sprintf("\r\n[Reconnection failed after %d attempts]\r\n", attempt)
-			err := s.ws.Write(websocket.TextMessage, []byte(errorMsg))
-			if err != nil {
-				slog.Warn("Failed to send reconnection failure message", "nodeID", s.nodeID, "error", err)
-			}
-			
-			s.Close()
-			return false
-		case <-s.ctx.Done():
-			slog.Info("Session closed during reconnection", "nodeID", s.nodeID, "error", s.ctx.Err())
-			s.Close()
-			return false
-		// Wait before next retry
-		case <-time.After(retryDelay):
-		}
+	if err := s.startConmanProcess(); err != nil {
+		slog.Warn("Failed to start conman", "nodeID", s.nodeID, "error", err)
+		// Don't close - let monitorProcess retry
+		return
 	}
+
+	// Process started successfully
+	slog.Info("Successfully started conman for console", "nodeID", s.nodeID)
+
+	// Restart output streaming
+	// The console output itself will indicate when we're truly connected
+	// Track this new goroutine in the main WaitGroup
+	s.wg.Add(1)
+	go s.streamOutput()
+	// Note: streamInput is already running and will continue to work with the new PTY
 }
 
 // isEIO checks if an error is an I/O error (EIO)
