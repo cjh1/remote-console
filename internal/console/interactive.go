@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail/ratelimiter"
@@ -29,9 +30,9 @@ type interactiveConsoleSession struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	ws            *webSocketSession
+	ws            *webSocketSession	       // WebSocket session
 	rateLimiter   *ratelimiter.LeakyBucket // Rate limit console output
-	wg            sync.WaitGroup           // Tracks all goroutines including reconnected ones
+	wg            sync.WaitGroup           // Tracks all goroutines
 	processExited chan struct{}            // Closed when current conman process exits
 }
 
@@ -40,7 +41,7 @@ type interactiveConsoleSession struct {
 func (s *interactiveConsoleSession) Close() {
 	slog.Info("Starting close for console session", "nodeID", s.nodeID)
 
-	// Cancel context to signal all goroutines to stop (idempotent)
+	// Cancel context to signal all goroutines to stop 
 	s.cancel()
 
 	// Try graceful disconnect via ConMan escape sequence
@@ -71,7 +72,7 @@ func (s *interactiveConsoleSession) Close() {
 	}
 	s.ptmxMutex.Unlock()
 
-	// Close WebSocket - already handles multiple closes internally
+	// Close WebSocket 
 	s.ws.Close()
 
 	slog.Info("Close completed for console session", "nodeID", s.nodeID)
@@ -94,7 +95,7 @@ func (s *interactiveConsoleSession) monitorProcess() {
 		}
 		
 		// Check if the node still exists (might have been updated/changed)
-		if !validateNode(s.nodeID) {
+		if !nodes.IsCurrentNode(s.nodeID) {
 			slog.Info("Node no longer exists, closing session", "nodeID", s.nodeID)
 			s.Close()
 			return
@@ -137,6 +138,7 @@ func (s *interactiveConsoleSession) startConmanProcess() error {
 	s.processExited = make(chan struct{})
 	go func() {
 		s.cmd.Wait()
+		// Notify monitorProcess of exit
 		close(s.processExited)
 	}()
 
@@ -146,11 +148,13 @@ func (s *interactiveConsoleSession) startConmanProcess() error {
 // reconnect attempts to restart the conman process and reconnect streams
 // Logs errors but does not fail - monitorProcess will retry on next process exit
 func (s *interactiveConsoleSession) reconnect() {
+
 	// Notify user via WebSocket
 	reconnectMsg := fmt.Sprintf("\n[Reconnecting to %s...]\n", s.nodeID)
 	err := s.ws.Write(websocket.TextMessage, []byte(reconnectMsg))
 	if err != nil {
-		slog.Warn("Failed to send reconnect message", "nodeID", s.nodeID, "error", err)
+		slog.Warn("WebSocket write failed, closing session", "nodeID", s.nodeID, "error", err)
+		s.Close()
 		return
 	}
 
@@ -184,13 +188,11 @@ func (s *interactiveConsoleSession) reconnect() {
 // isEIO checks if an error is an I/O error (EIO)
 // This happens when reading from a PTY after the process has been killed
 func isEIO(err error) bool {
-	if err == nil {
-		return false
-	}
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
 		return errno == syscall.EIO
 	}
+
 	return false
 }
 
@@ -201,15 +203,14 @@ func (s *interactiveConsoleSession) streamOutput() {
 	buf := make([]byte, 4096)
 	for {
 		s.ptmxMutex.RLock()
-		ptmx := s.ptmx
-		s.ptmxMutex.RUnlock()
-		
-		if ptmx == nil {
+		if s.ptmx == nil {
+			s.ptmxMutex.RUnlock()
 			slog.Debug("PTY is nil, exiting streamOutput for console", "nodeID", s.nodeID)
 			return
 		}
 		
-		n, err := ptmx.Read(buf)
+		n, err := s.ptmx.Read(buf)
+		s.ptmxMutex.RUnlock()
 		if err != nil {
 			// Don't log I/O errors - they're expected when the process is killed
 			if err != io.EOF && !isEIO(err) {
@@ -287,6 +288,20 @@ func (s *interactiveConsoleSession) streamInput() {
 
 // start begins the console session by launching all goroutines and waiting for completion
 func (s *interactiveConsoleSession) Start() {
+	// Start WebSocket session
+	s.ws.Start()
+
+	// Start initial conman process with PTY
+	if err := s.startConmanProcess(); err != nil {
+		slog.Error("Failed to start conman with PTY", "nodeID", s.nodeID, "error", err)
+		err = s.ws.Write(websocket.TextMessage, []byte("Error: Failed to start conman with PTY"))
+		if err != nil {
+			slog.Warn("Failed to send error message via WebSocket", "nodeID", s.nodeID, "error", err)
+		}
+		s.Close()
+		return
+	}
+
 	// Monitor process exit for reconnection attempts
 	go s.monitorProcess()
 
@@ -308,22 +323,9 @@ func NewInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interact
 		rateLimiter: ratelimiter.NewLeakyBucket(rateLimitBurstKB, rateLimitInterval),
 		ctx:         ctx,
 		cancel:  cancel,
-
 	}
 
 	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID))
-	session.ws.Start()
-
-	// Start conman process with PTY
-	if err := session.startConmanProcess(); err != nil {
-		slog.Error("Failed to start conman with PTY", "nodeID", nodeID, "error", err)
-		err = session.ws.Write(websocket.TextMessage, []byte("Error: Failed to start conman with PTY"))
-		if err != nil {
-			slog.Warn("Failed to send error message via WebSocket", "nodeID", nodeID, "error", err)
-		}
-		session.Close()
-		return nil
-	}
 
 	return session
 }
@@ -332,14 +334,14 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
-	nodeID, err := extractNodeId(w, r)
+	nodeID, err := extractNodeId(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Make sure we are monitoring a valid node
-	if exists := validateNode(nodeID); !exists {
+	if exists := nodes.IsCurrentNode(nodeID); !exists {
 		http.Error(w, "Node doesn't exists", http.StatusNotFound)
 		return
 	}
@@ -356,16 +358,7 @@ func doInteractiveConsole(w http.ResponseWriter, r *http.Request) {
 
 	// From here on, errors must be sent via WebSocket close frames
 	session := NewInteractiveConsoleSession(nodeID, conn)
-	if session == nil {
-		conn.WriteMessage(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console session"))
-		conn.Close()
-		return
-	}
-
 	defer session.Close() // Ensure cleanup always happens
-
-	slog.Info("Started conman process for console", "nodeID", nodeID)
 
 	// Start session (blocks until all goroutines complete)
 	session.Start()

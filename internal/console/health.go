@@ -34,13 +34,6 @@ import (
 	"net/http"
 )
 
-type HealthService interface {
-	doLiveness(w http.ResponseWriter, r *http.Request)
-	doHealth(w http.ResponseWriter, r *http.Request)
-	doReadiness(w http.ResponseWriter, r *http.Request)
-	getCurrentHealth() HealthResponse
-}
-
 // HealthResponse - used to report service health stats
 type HealthResponse struct {
 	NumberConsoles     string `json:"consoles"`

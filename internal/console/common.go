@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/OpenCHAMI/remote-console/internal/nodes"
-
 	"github.com/go-chi/chi/v5"
 )
 
@@ -26,16 +24,8 @@ func drainAndCloseRequestBody(req *http.Request) {
 	}
 }
 
-func validateNode(id string) bool {
-	// make sure this is a valid node
-	if !nodes.IsCurrentNode(id) {
-		slog.Error("Invalid node ID", "nodeID", id)
-		return false
-	}
-	return true
-}
 
-func extractNodeId(w http.ResponseWriter, r *http.Request) (string, error) {
+func extractNodeId(r *http.Request) (string, error) {
 	nodeID := chi.URLParam(r, "nodeID")
 	if nodeID == "" {
 		slog.Error("Failed to extract node ID from request", "path", r.URL.Path)

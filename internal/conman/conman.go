@@ -183,8 +183,6 @@ func (cs *conmanService) SignalConmanHUP() {
 	if cs.command != nil {
 		slog.Info("Signaling conman with SIGHUP")
 		cs.command.Process.Signal(syscall.SIGHUP)
-	} else {
-		slog.Warn("Attempting to signal conman process when nil")
 	}
 }
 
@@ -219,14 +217,17 @@ func (cs *conmanService) ExecuteConman() error {
 	}
 	go logPipeOutput(&cmdStdErr, "stderr")
 	go logPipeOutput(&cmdStdOut, "stdout")
+
 	slog.Info("Starting conmand process")
 	if err = cs.command.Start(); err != nil {
 		return fmt.Errorf("Unable to start the command: %w", err)
 	}
+
 	if err = cs.command.Wait(); err != nil {
 		slog.Error("Conmand process exited with error", "error", err)
 		time.Sleep(15 * time.Second)
 	}
+	
 	cs.command = nil
 	slog.Info("Conmand process has exited")
 

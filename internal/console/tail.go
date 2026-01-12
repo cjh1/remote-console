@@ -17,7 +17,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail"
 	"github.com/nxadm/tail/ratelimiter"
+
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
+
 
 type consoleTailSession struct {
 	nodeID          string
@@ -287,7 +290,7 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
-	nodeID, err := extractNodeId(w, r)
+	nodeID, err := extractNodeId(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -296,7 +299,7 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 	slog.Info("Tailing console for node", "nodeID", nodeID)
 
 	// Make sure we are monitoring a valid node
-	if exists := validateNode(nodeID); !exists {
+	if exists := nodes.IsCurrentNode(nodeID); !exists {
 		http.Error(w, "Node not found", http.StatusNotFound)
 		return
 	}
