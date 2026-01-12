@@ -269,17 +269,17 @@ func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
 
 	// Try to tail a non-existent node
 	invalidNodeID := "x9c9s9b9"
-	
+
 	params := url.Values{}
 	params.Set("mode", "tail")
-	
+
 	wsURL := url.URL{
-		Scheme: "ws",
-		Host:   parsedURL.Host,
-		Path:   fmt.Sprintf("/remote-console/consoles/%s", invalidNodeID),
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
+		Path:     fmt.Sprintf("/remote-console/consoles/%s", invalidNodeID),
 		RawQuery: params.Encode(),
 	}
-	
+
 	_, resp, err := s.dialWebSocket(wsURL)
 
 	// Should get an error because the WebSocket upgrade should fail with 404

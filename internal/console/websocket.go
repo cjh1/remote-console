@@ -21,21 +21,21 @@ type webSockMessage struct {
 }
 
 type webSocketSession struct {
-	conn       *websocket.Conn
-	send       chan webSockMessage // outbound messages to be sent to the client
-	name       string
-	ctx        context.Context // cancelled when the session is closed
-	cancel     context.CancelFunc
+	conn   *websocket.Conn
+	send   chan webSockMessage // outbound messages to be sent to the client
+	name   string
+	ctx    context.Context // cancelled when the session is closed
+	cancel context.CancelFunc
 }
 
 func NewWebSocketSession(conn *websocket.Conn, name string) *webSocketSession {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &webSocketSession{
-		conn:       conn,
-		send:       make(chan webSockMessage, 64),
-		ctx:        ctx,
+		conn:   conn,
+		send:   make(chan webSockMessage, 64),
+		ctx:    ctx,
 		cancel: cancel,
-		name:       name,
+		name:   name,
 	}
 }
 
@@ -57,7 +57,7 @@ func (ws *webSocketSession) Read() (int, []byte, error) {
 
 func (ws *webSocketSession) Write(messageType int, data []byte) error {
 	payload := append([]byte(nil), data...)
-	
+
 	select {
 	case ws.send <- webSockMessage{messageType: messageType, data: payload}:
 		return nil
@@ -66,42 +66,40 @@ func (ws *webSocketSession) Write(messageType int, data []byte) error {
 	}
 }
 
-
 func (ws *webSocketSession) Close() {
 	ws.cancel()
 }
 
-
 func (ws *webSocketSession) writePump() {
-    ticker := time.NewTicker(pingPeriod)
-    defer ticker.Stop()
-    defer ws.conn.Close()
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
+	defer ws.conn.Close()
 
 	for {
 		select {
 		// Handle outbound messages
 		case msg, ok := <-ws.send:
-            ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
-            if !ok {
-                ws.conn.WriteMessage(websocket.CloseMessage, []byte{})
-                return
-            }
-            if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
-                slog.Error("WebSocket write failed", "name", ws.name, "error", err)
-                // Connection broken, close channels immediately (can't drain)
+			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				ws.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
+				slog.Error("WebSocket write failed", "name", ws.name, "error", err)
+				// Connection broken, close channels immediately (can't drain)
 				ws.cancel()
 				return
-            }
+			}
 		// Handle periodic ping
 		case <-ticker.C:
 			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
-            if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-                slog.Error("WebSocket ping failed", "name", ws.name, "error", err)
-                // Connection broken, close channels immediately (can't drain)
+			if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				slog.Error("WebSocket ping failed", "name", ws.name, "error", err)
+				// Connection broken, close channels immediately (can't drain)
 				ws.cancel()
 				return
-            }
-		
+			}
+
 		case <-ws.ctx.Done():
 			for {
 				select {
@@ -117,7 +115,7 @@ func (ws *webSocketSession) writePump() {
 					return
 				}
 			}
-        }
+		}
 	}
 }
 

@@ -37,7 +37,6 @@ var (
 	inShutdown bool = false
 )
 
-
 func main() {
 	initLogger()
 

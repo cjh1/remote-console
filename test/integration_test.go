@@ -366,20 +366,20 @@ func (s *IntegrationTestSuite) tailWebSocketURL(nodeID string, params url.Values
 	if err != nil {
 		return url.URL{}, fmt.Errorf("failed to parse API URL: %w", err)
 	}
-	
+
 	// Start with mode=tail, add any additional parameters
 	if params == nil {
 		params = url.Values{}
 	}
 	params.Set("mode", "tail")
-	
+
 	wsURL := url.URL{
-		Scheme: "ws",
-		Host:   parsedURL.Host,
-		Path:   fmt.Sprintf("/remote-console/consoles/%s", nodeID),
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
+		Path:     fmt.Sprintf("/remote-console/consoles/%s", nodeID),
 		RawQuery: params.Encode(),
 	}
-	
+
 	return wsURL, nil
 }
 
@@ -403,7 +403,7 @@ func (s *IntegrationTestSuite) readWebSocketMessages(wsConn *websocket.Conn, tim
 			s.T().Logf("WebSocket read ended after %d messages (%s elapsed). timeout=%v err=%v", messageCount, time.Since(start), isTimeout, err)
 			break
 		}
-		
+
 		msgStr := string(message)
 		s.T().Logf("Console: %s", msgStr)
 		output.WriteString(msgStr)
@@ -422,7 +422,7 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 			s.T().Logf("WebSocket read ended: %v", err)
 			return output.String(), fmt.Errorf("websocket read error while searching for %q: %w", searchString, err)
 		}
-		
+
 		msgStr := string(message)
 		s.T().Logf("Console: %s", msgStr)
 		output.WriteString(msgStr)
@@ -643,17 +643,17 @@ func (s *IntegrationTestSuite) TestDynamicConsoleDiscovery() {
 	// Try to connect again, should fail immediately (no retries needed)
 	parsedURL, err := url.Parse(s.apiURL)
 	s.Require().NoError(err)
-	
+
 	params := url.Values{}
 	params.Set("mode", "tail")
-	
+
 	wsURL := url.URL{
-		Scheme: "ws",
-		Host:   parsedURL.Host,
+		Scheme:   "ws",
+		Host:     parsedURL.Host,
 		Path:     fmt.Sprintf("/remote-console/consoles/%s", newNodeID),
 		RawQuery: params.Encode(),
 	}
-	
+
 	_, resp, err = s.dialWebSocket(wsURL)
 	s.Require().Error(err, "Expected error connecting to removed console")
 	if resp != nil {

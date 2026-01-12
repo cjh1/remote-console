@@ -128,7 +128,7 @@ func (cs *credsService) GetPasswordsWithRetries(ctx context.Context, bmcXNames [
 func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
 	var ss sstorage.SecureStorage
 	var err error
-	
+
 	if config.SecureStorageAdapter == StorageAdapterVault {
 		ss, err = sstorage.NewVaultAdapterAs(config.VaultBasePath, config.VaultRole)
 		if err != nil {

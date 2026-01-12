@@ -21,16 +21,16 @@ import (
 
 // interactiveConsoleSession manages the lifecycle of an interactive console session
 type interactiveConsoleSession struct {
-	cmd         *exec.Cmd
-	ptmx        *os.File
-	ptmxMutex   sync.RWMutex // Protects ptmx during reconnection
-	nodeID      string
-	
-	// Context for coordinating shutdown across all goroutines
-	ctx         context.Context
-	cancel      context.CancelFunc
+	cmd       *exec.Cmd
+	ptmx      *os.File
+	ptmxMutex sync.RWMutex // Protects ptmx during reconnection
+	nodeID    string
 
-	ws            *webSocketSession	       // WebSocket session
+	// Context for coordinating shutdown across all goroutines
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	ws            *webSocketSession        // WebSocket session
 	rateLimiter   *ratelimiter.LeakyBucket // Rate limit console output
 	wg            sync.WaitGroup           // Tracks all goroutines
 	processExited chan struct{}            // Closed when current conman process exits
@@ -41,14 +41,14 @@ type interactiveConsoleSession struct {
 func (s *interactiveConsoleSession) Close() {
 	slog.Info("Starting close for console session", "nodeID", s.nodeID)
 
-	// Cancel context to signal all goroutines to stop 
+	// Cancel context to signal all goroutines to stop
 	s.cancel()
 
 	// Try graceful disconnect via ConMan escape sequence
 	s.ptmxMutex.RLock()
 	ptmx := s.ptmx
 	s.ptmxMutex.RUnlock()
-	
+
 	if ptmx != nil {
 		slog.Info("Sending ConMan escape sequence (&.) to disconnect from console", "nodeID", s.nodeID)
 		// Ignore write errors - PTY might already be closed
@@ -72,7 +72,7 @@ func (s *interactiveConsoleSession) Close() {
 	}
 	s.ptmxMutex.Unlock()
 
-	// Close WebSocket 
+	// Close WebSocket
 	s.ws.Close()
 
 	slog.Info("Close completed for console session", "nodeID", s.nodeID)
@@ -84,7 +84,7 @@ func (s *interactiveConsoleSession) monitorProcess() {
 	for {
 		<-s.processExited
 		slog.Info("Conman process exited for console", "nodeID", s.nodeID)
-		
+
 		// Wait before reconnecting to prevent tight loop
 		select {
 		case <-time.After(time.Second):
@@ -93,17 +93,17 @@ func (s *interactiveConsoleSession) monitorProcess() {
 			slog.Info("Session closing during reconnect delay, stopping monitor for console", "nodeID", s.nodeID)
 			return
 		}
-		
+
 		// Check if the node still exists (might have been updated/changed)
 		if !nodes.IsCurrentNode(s.nodeID) {
 			slog.Info("Node no longer exists, closing session", "nodeID", s.nodeID)
 			s.Close()
 			return
 		}
-		
+
 		slog.Info("Node still exists, attempting to reconnect", "nodeID", s.nodeID)
 		s.reconnect()
-		
+
 		// Check if session is closing after reconnect attempt
 		select {
 		case <-s.ctx.Done():
@@ -122,7 +122,7 @@ func (s *interactiveConsoleSession) startConmanProcess() error {
 		return fmt.Errorf("session closing, cannot start conman process: %w", s.ctx.Err())
 	default:
 	}
-	
+
 	s.cmd = exec.Command("conman", s.nodeID)
 
 	ptmx, err := pty.Start(s.cmd)
@@ -167,7 +167,7 @@ func (s *interactiveConsoleSession) reconnect() {
 
 	// Try to start conman again
 	slog.Info("Attempting to reconnect conman", "nodeID", s.nodeID)
-	
+
 	if err := s.startConmanProcess(); err != nil {
 		slog.Warn("Failed to start conman", "nodeID", s.nodeID, "error", err)
 		// Don't close - let monitorProcess retry
@@ -208,7 +208,7 @@ func (s *interactiveConsoleSession) streamOutput() {
 			slog.Debug("PTY is nil, exiting streamOutput for console", "nodeID", s.nodeID)
 			return
 		}
-		
+
 		n, err := s.ptmx.Read(buf)
 		s.ptmxMutex.RUnlock()
 		if err != nil {
@@ -222,14 +222,14 @@ func (s *interactiveConsoleSession) streamOutput() {
 
 		if n > 0 {
 			slog.Debug("PTY read", "nodeID", s.nodeID, "bytes", n, "data", string(buf[:n]))
-			
+
 			// Apply rate limiting (convert bytes to KB, rounded up)
 			kb := uint16((n + 1023) / 1024)
 			for !s.rateLimiter.Pour(kb) {
 				slog.Debug("Rate limit reached, waiting for capacity", "nodeID", s.nodeID)
 				time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
 			}
-			
+
 			err := s.ws.Write(websocket.BinaryMessage, buf[:n])
 			if err != nil {
 				// WebSocket closed/cancelled, exit gracefully
@@ -273,10 +273,10 @@ func (s *interactiveConsoleSession) streamInput() {
 				}
 				continue
 			}
-			
+
 			_, err := s.ptmx.Write(message)
 			s.ptmxMutex.RUnlock()
-			
+
 			if err != nil {
 				slog.Error("Failed to write to PTY", "nodeID", s.nodeID, "error", err)
 				s.Close()
@@ -314,15 +314,14 @@ func (s *interactiveConsoleSession) Start() {
 	s.wg.Wait()
 }
 
-
 func NewInteractiveConsoleSession(nodeID string, conn *websocket.Conn) *interactiveConsoleSession {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	session := &interactiveConsoleSession{
 		nodeID:      nodeID,
 		rateLimiter: ratelimiter.NewLeakyBucket(rateLimitBurstKB, rateLimitInterval),
 		ctx:         ctx,
-		cancel:  cancel,
+		cancel:      cancel,
 	}
 
 	session.ws = NewWebSocketSession(conn, fmt.Sprintf("interactive session %s", nodeID))

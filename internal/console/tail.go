@@ -13,14 +13,13 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	
+
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail"
 	"github.com/nxadm/tail/ratelimiter"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 )
-
 
 type consoleTailSession struct {
 	nodeID          string
@@ -59,7 +58,7 @@ func (cts *consoleTailSession) close() {
 		slog.Info("Closing console tail session", "nodeID", cts.nodeID)
 
 		cts.ws.Close()
-	
+
 		slog.Info("Close completed for console tail session", "nodeID", cts.nodeID)
 	})
 }
@@ -106,14 +105,14 @@ func (cts *consoleTailSession) streamConsoleTail(follow bool) {
 
 		// Add newline back (tail library strips it)
 		lineText := line.Text + "\n"
-	
+
 		// Apply rate limiting (convert bytes to KB, rounded up)
 		kb := uint16((len(lineText) + 1023) / 1024)
 		for !cts.rateLimiter.Pour(kb) {
 			slog.Debug("Rate limit reached for tail, waiting for capacity", "nodeID", cts.nodeID)
 			time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
 		}
-		
+
 		err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
 		if err != nil {
 			slog.Error("Failed to write message to websocket", "error", err, "nodeID", cts.nodeID)
@@ -143,7 +142,7 @@ func readLastNLines(filename string, numLines int) ([]string, int64, error) {
 	const maxLineLength = 1024 * 1024
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, maxLineLength)
-	
+
 	for scanner.Scan() {
 		r.Value = scanner.Text()
 		r = r.Next()
@@ -190,18 +189,18 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 	// If numLines is specified, send last N lines first
 	if numLines > 0 {
 		lines, currentPos, err := readLastNLines(filename, numLines)
-		
+
 		if err == nil {
 			for _, line := range lines {
 				lineText := line + "\n"
-				
+
 				// Apply rate limiting (convert bytes to KB, rounded up)
 				kb := uint16((len(lineText) + 1023) / 1024)
 				for !cts.rateLimiter.Pour(kb) {
 					slog.Debug("Rate limit reached for tail (history), waiting for capacity", "nodeID", cts.nodeID)
 					time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
 				}
-				
+
 				err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
 				if err != nil {
 					slog.Error("Failed to send lines", "error", err, "nodeID", cts.nodeID)
@@ -245,11 +244,11 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 		}
 	}
 
-	// Configuration for tail 
+	// Configuration for tail
 	conf := tail.Config{
 		Follow:      follow,
-		MustExist:   false, // If file doesn't exist keep trying
-		Poll:        true,  // Poll instead of using inotify -- inotify may not work on all filesystems
+		MustExist:   false,       // If file doesn't exist keep trying
+		Poll:        true,        // Poll instead of using inotify -- inotify may not work on all filesystems
 		MaxLineSize: 1024 * 1024, // 1MB max line size (well below 10MB bucket capacity)
 		Logger:      tail.DiscardingLogger,
 	}

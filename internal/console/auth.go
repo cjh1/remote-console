@@ -41,7 +41,7 @@ func FetchPublicKeyFromURL(url string) error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	set, err := jwk.Fetch(ctx, url, jwk.WithHTTPClient(client))
 	if err != nil {
 		msg := "%w"
@@ -54,12 +54,12 @@ func FetchPublicKeyFromURL(url string) error {
 
 		return fmt.Errorf(msg, err)
 	}
-	
+
 	jwks, err := json.Marshal(set)
 	if err != nil {
 		return fmt.Errorf("failed to marshal JWKS: %w", err)
 	}
-	
+
 	TokenAuth, err = jwtauth.NewKeySet(jwks)
 	if err != nil {
 		return fmt.Errorf("failed to initialize JWKS: %w", err)

@@ -227,7 +227,7 @@ func (cs *conmanService) ExecuteConman() error {
 		slog.Error("Conmand process exited with error", "error", err)
 		time.Sleep(15 * time.Second)
 	}
-	
+
 	cs.command = nil
 	slog.Info("Conmand process has exited")
 

@@ -13,8 +13,8 @@ import (
 // Rate limiter constants for console output
 const (
 	// Rate limit in KB units: 10MB burst, 1MB/sec sustained
-	rateLimitBurstKB    = 10240 // 10MB burst capacity
-	rateLimitInterval = 1*time.Millisecond     // Drain 1KB per millisecond = 1MB/sec
+	rateLimitBurstKB  = 10240                // 10MB burst capacity
+	rateLimitInterval = 1 * time.Millisecond // Drain 1KB per millisecond = 1MB/sec
 )
 
 func drainAndCloseRequestBody(req *http.Request) {
@@ -23,7 +23,6 @@ func drainAndCloseRequestBody(req *http.Request) {
 		req.Body.Close()                     // ok even if already closed
 	}
 }
-
 
 func extractNodeId(r *http.Request) (string, error) {
 	nodeID := chi.URLParam(r, "nodeID")

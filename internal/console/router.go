@@ -32,10 +32,9 @@ import (
 	"github.com/OpenCHAMI/jwtauth/v5"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	openchami_authenticator "github.com/openchami/chi-middleware/auth"
 	"github.com/gorilla/websocket"
+	openchami_authenticator "github.com/openchami/chi-middleware/auth"
 )
-
 
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
@@ -66,7 +65,7 @@ func doConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
 
 func SetupRoutes(consoleLogsPath string) *chi.Mux {
 	router := chi.NewRouter()
-	
+
 	// Add common middleware
 	router.Use(middleware.RedirectSlashes)
 
@@ -98,6 +97,6 @@ func SetupRoutes(consoleLogsPath string) *chi.Mux {
 	// router.Delete("/remote-console/clearData", dbs.doClearData)
 	// router.Post("/remote-console/suspend", dbs.doSuspend)
 	// router.Post("/remote-console/resume", dbs.doResume)
-	
+
 	return router
 }
