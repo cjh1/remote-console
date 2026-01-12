@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -24,7 +23,6 @@ type webSockMessage struct {
 type webSocketSession struct {
 	conn       *websocket.Conn
 	send       chan webSockMessage // outbound messages to be sent to the client
-	closeOnce  sync.Once           // ensures send channel is only closed once
 	name       string
 	ctx        context.Context // cancelled when the session is closed
 	cancel     context.CancelFunc
@@ -71,37 +69,8 @@ func (ws *webSocketSession) Write(messageType int, data []byte) error {
 }
 
 
-func (ws *webSocketSession) closeChannels() {
-	// Cancel context to signal closure
-	ws.cancel()
-	
-	// Close send channel (protected by closeOnce)
-	ws.closeOnce.Do(func() {
-		close(ws.send)
-	})
-}
-
 func (ws *webSocketSession) Close() {
-	// Cancel context to signal closure (safe to call multiple times)
 	ws.cancel()
-
-	// Try to drain outstanding messages before closing send channel
-	// Use closeOnce to ensure we only close the send channel once
-	ws.closeOnce.Do(func() {
-		for {
-			select {
-			case msg := <-ws.send:
-				ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
-				if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
-					slog.Error("WebSocket write failed during drain", "name", ws.name, "error", err)
-				}
-			// No more messages to send, we can close the channel
-			default:
-				close(ws.send)
-				return
-			}
-		}
-	})
 }
 
 
@@ -110,8 +79,8 @@ func (ws *webSocketSession) writePump() {
     defer ticker.Stop()
     defer ws.conn.Close()
 
-    for {
-        select {
+	for {
+		select {
 		case msg, ok := <-ws.send:
             ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
             if !ok {
@@ -121,19 +90,34 @@ func (ws *webSocketSession) writePump() {
             if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
                 slog.Error("WebSocket write failed", "name", ws.name, "error", err)
                 // Connection broken, close channels immediately (can't drain)
-                ws.closeChannels()
-                ws.handleClose()
-                return
+				ws.cancel()
+				ws.handleClose()
+				return
             }
 		case <-ticker.C:
 			ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
             if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
                 slog.Error("WebSocket ping failed", "name", ws.name, "error", err)
                 // Connection broken, close channels immediately (can't drain)
-                ws.closeChannels()
-                ws.handleClose()
-                return
+				ws.cancel()
+				ws.handleClose()
+				return
             }
+		case <-ws.ctx.Done():
+			for {
+				select {
+				case msg := <-ws.send:
+					ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+					if err := ws.conn.WriteMessage(msg.messageType, msg.data); err != nil {
+						slog.Error("WebSocket write failed during drain", "name", ws.name, "error", err)
+						return
+					}
+				default:
+					ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
+					ws.conn.WriteMessage(websocket.CloseMessage, []byte{})
+					return
+				}
+			}
         }
 	}
 }
