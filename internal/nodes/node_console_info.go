@@ -20,10 +20,11 @@ const (
 // Exported for use by console and creds packages
 
 type NodeConsoleInfo struct {
-	ID             string `json:"id"`             // node xname
-	ConnectionType string `json:"connectionType"` // connection type
-	ConnectionHost string `json:"connectionHost"` // connection host
-	ConnectionPort int    `json:"connectionPort"` // connection port
+	ID                  string `json:"id"`                  // node xname
+	ConnectionType      string `json:"connectionType"`      // connection type
+	ConnectionHost      string `json:"connectionHost"`      // connection host
+	ConnectionPort      int    `json:"connectionPort"`      // connection port
+	ConsoleEntryCommand string `json:"consoleEntryCommand"` // optional command to run after connecting
 }
 
 func (nc NodeConsoleInfo) String() string {

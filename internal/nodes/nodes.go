@@ -169,10 +169,11 @@ func serialConsoleToNodeConsoleInfo(endpoint componentEndpoint) *NodeConsoleInfo
 
 	if sc.SSH != nil && sc.SSH.ServiceEnabled {
 		return &NodeConsoleInfo{
-			ID:             endpoint.ID,
-			ConnectionType: SSH,
-			ConnectionHost: endpoint.RedfishEndpointFQDN,
-			ConnectionPort: sc.SSH.Port,
+			ID:                  endpoint.ID,
+			ConnectionType:      SSH,
+			ConnectionHost:      endpoint.RedfishEndpointFQDN,
+			ConnectionPort:      sc.SSH.Port,
+			ConsoleEntryCommand: sc.SSH.ConsoleEntryCommand,
 		}
 	} else if sc.IPMI != nil && sc.IPMI.ServiceEnabled {
 		return &NodeConsoleInfo{
@@ -322,7 +323,6 @@ func CurrentNodes() map[string]*NodeConsoleInfo {
 		nodesCopy[k] = v
 	}
 
-	fmt.Println("CurrentNodes: returning copy of current nodes")
 	return nodesCopy
 }
 

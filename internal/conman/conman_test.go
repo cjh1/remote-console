@@ -51,18 +51,18 @@ func TestConfigureConman(t *testing.T) {
 	config.PidFilePath = filepath.Join(tempDir, "conman.pid")
 
 	nodes := map[string]*nodes.NodeConsoleInfo{
-		"x0c0s1b0": &nodes.NodeConsoleInfo{
+		"x0c0s1b0": {
 			ID:             "x0c0s1b0",
 			ConnectionType: nodes.IPMI,
 			ConnectionHost: "x0c0s1b0",
 		},
-		"x0c0s2b0": &nodes.NodeConsoleInfo{
+		"x0c0s2b0": {
 			ID:             "x0c0s2b0",
 			ConnectionType: nodes.SSH,
 			ConnectionHost: "x0c0s2b0",
 			ConnectionPort: 2222,
 		},
-		"x0c0s3b0": &nodes.NodeConsoleInfo{
+		"x0c0s3b0": {
 			ID:             "x0c0s3b0",
 			ConnectionType: nodes.SSH,
 			ConnectionHost: "x0c0s3b0",
@@ -70,15 +70,15 @@ func TestConfigureConman(t *testing.T) {
 	}
 
 	passwords := map[string]compcredentials.CompCredentials{
-		"x0c0s1b0": compcredentials.CompCredentials{
+		"x0c0s1b0": {
 			Username: "admin",
 			Password: "password1",
 		},
-		"x0c0s2b0": compcredentials.CompCredentials{
+		"x0c0s2b0": {
 			Username: "admin",
 			Password: "",
 		},
-		"x0c0s3b0": compcredentials.CompCredentials{
+		"x0c0s3b0": {
 			Username: "admin",
 			Password: "password3",
 		},

@@ -263,6 +263,52 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 	}
 }
 
+func (s *IntegrationTestSuite) TestConsoleTailEntryCommand() {
+	// Test that the entry command is executed when connecting to the console
+	console := consoleFixture{
+		name:           "ssh-entry-cmd",
+		nodeID:         "x0c0s0b0n0",
+		containerKey:   "remote-console",
+		username:       "ADMIN",
+		password:       "ADMIN",
+		readyLogMarker: "Welcome to OpenSSH Server",
+		prompt:         ":~$ ",
+		// We use 'expect' here as with the entry command there may not be a pty that
+		// broadcast.sh can write to, so we spawn conman in expect to echo a message
+		broadcastCmd: func(msg string) []string {
+			return []string{"expect", "-c", fmt.Sprintf("spawn conman x0c0s0b0n0; expect \"password:\"; expect \":~$ \"; send \"echo '%s'\\r\"; send \"&.\\r\"; expect eof", msg)}
+		},
+	}
+
+	params := url.Values{}
+	params.Set("follow", "true")
+	wsURL, err := s.tailWebSocketURL(console.nodeID, params)
+	s.Require().NoError(err)
+
+	wsConn, resp, err := s.dialWebSocket(wsURL)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	// // Wait for the shell prompt to appear from the entry command
+	// _, err = s.readWebSocketUntil(wsConn, fmt.Sprintf("%s@%s's password:", console.username, console.nodeID), tailMessageTimeout)
+	// s.Require().NoError(err, "Expected shell prompt for %s", console.name)
+
+	// Check for the echo from the entry command
+	_, err = s.readWebSocketUntil(wsConn, "Hello n0", tailMessageTimeout)
+	s.Require().NoError(err, "Expected shell prompt for %s", console.name)
+
+	// Test that we can broadcast to the console (verify entry command shell is functional)
+	testMsg := makeUnique("entry-cmd-test")
+	exitCode, output, err := s.broadcastConsoleMessage(console, testMsg)
+	s.Require().NoError(err)
+	s.T().Logf("Sent test message to %s console (exit code %d): %s", console.name, exitCode, output)
+
+	_, err = s.readWebSocketUntil(wsConn, testMsg, tailMessageTimeout)
+	s.Require().NoError(err, "Expected to find broadcast message '%s' in console with entry command", testMsg)
+
+}
+
 func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
 	parsedURL, err := url.Parse(s.apiURL)
 	s.Require().NoError(err, "Failed to parse API URL")

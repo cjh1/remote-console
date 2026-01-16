@@ -66,7 +66,12 @@ func (ls *logsService) watchConsoleLogFile(ctx context.Context, consoleLogsPath 
 	slog.Info("Setting up console log tail", "filename", filename, "xname", xname)
 
 	// set up a tail operation on the console file
-	t, err := tail.TailFile(filename, tail.Config{Follow: true, ReOpen: true, MustExist: false})
+	t, err := tail.TailFile(filename, tail.Config{
+		Follow:    true,
+		ReOpen:    true,
+		MustExist: false,
+		Poll:      true, // Avoid missing updates when files are recreated/rotated.
+	})
 	if err != nil {
 		slog.Error("Failed to setup tail on file", "filename", filename, "error", err)
 		return

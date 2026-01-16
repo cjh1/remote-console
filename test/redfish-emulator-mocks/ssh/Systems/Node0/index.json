@@ -57,7 +57,8 @@
     "SerialConsole": {
         "MaxConcurrentSessions": 4,
         "SSH": {
-            "ServiceEnabled": true
+            "ServiceEnabled": true,
+            "ConsoleEntryCommand": "echo 'Hello n0' && /bin/sh"
         }
     }
 }

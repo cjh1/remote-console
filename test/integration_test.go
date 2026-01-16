@@ -103,15 +103,15 @@ func (s *IntegrationTestSuite) SetupSuite() {
 	s.containers = make(map[string]testcontainers.Container)
 
 	// Create networks
-	rcsNet, err := network.New(ctx, network.WithCheckDuplicate())
+	rcsNet, err := network.New(ctx)
 	require.NoError(s.T(), err)
 	s.rcsNetwork = rcsNet
 
-	rcsRfNet, err := network.New(ctx, network.WithCheckDuplicate())
+	rcsRfNet, err := network.New(ctx)
 	require.NoError(s.T(), err)
 	s.rfNetwork = rcsRfNet
 
-	rcsConsoleNet, err := network.New(ctx, network.WithCheckDuplicate())
+	rcsConsoleNet, err := network.New(ctx)
 	require.NoError(s.T(), err)
 	s.consoleNetwork = rcsConsoleNet
 
@@ -332,6 +332,7 @@ func (s *IntegrationTestSuite) TestConsoles() {
 			ConnectionType: "ssh",
 			ConnectionHost: "x0c0s0b0",
 			ConnectionPort: 0,
+		ConsoleEntryCommand: "echo 'Hello n0' && /bin/sh",
 		},
 		{
 			ID:             "x0c0s1b0",
@@ -344,6 +345,7 @@ func (s *IntegrationTestSuite) TestConsoles() {
 			ConnectionType: "ssh",
 			ConnectionHost: "x0c0s1b0",
 			ConnectionPort: 0,
+		ConsoleEntryCommand: "echo 'Hello n0' && /bin/sh",
 		},
 		{
 			ID:             "x0c0s2b0",

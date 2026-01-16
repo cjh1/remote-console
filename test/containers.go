@@ -341,13 +341,13 @@ func deleteRedfishEndpoint(ctx context.Context, smdAPIURL string, endpointID str
 }
 
 // startSSHPasswordServer starts an SSH server with password authentication
-func startSSHPasswordServer(ctx context.Context, network string, alias string, username string, password string) (testcontainers.Container, error) {
+func startSSHPasswordServer(ctx context.Context, network string, host string, username string, password string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		Image:    "linuxserver/openssh-server:latest",
-		Hostname: alias,
+		Hostname: host,
 		Networks: []string{network},
 		NetworkAliases: map[string][]string{
-			network: {alias},
+			network: {host},
 		},
 		Env: map[string]string{
 			"PUID":            "1000",
@@ -375,13 +375,13 @@ func startSSHPasswordServer(ctx context.Context, network string, alias string, u
 }
 
 // startSSHKeyServer starts an SSH server with public key authentication
-func startSSHKeyServer(ctx context.Context, network string, alias string, username string, publicKey string) (testcontainers.Container, error) {
+func startSSHKeyServer(ctx context.Context, network string, host string, username string, publicKey string) (testcontainers.Container, error) {
 	req := testcontainers.ContainerRequest{
 		Image:    "linuxserver/openssh-server:latest",
-		Hostname: alias,
+		Hostname: host,
 		Networks: []string{network},
 		NetworkAliases: map[string][]string{
-			network: {alias},
+			network: {host},
 		},
 		Env: map[string]string{
 			"PUID":        "1000",

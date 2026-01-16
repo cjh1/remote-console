@@ -8,6 +8,7 @@ package conman
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -120,15 +121,25 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 
 			// If we have password creds, use those, otherwise use key-based
 			if creds.Password != "" {
-				slog.Debug("Configuring SSH console with password", "nodeID", nci.ID, "host", nci.ConnectionHost, "port", nci.ConnectionPort, "username", creds.Username)
-				output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-pwd-console %s %d %s %s\"\n",
-					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, creds.Password)
+				slog.Debug("Configuring SSH console with password", "nodeID", nci.ID, "host", nci.ConnectionHost, "port", nci.ConnectionPort, "username", creds.Username, "entryCmd", nci.ConsoleEntryCommand)
+				devArgs := fmt.Sprintf("%s/ssh-pwd-console %s %d %s %s", cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, creds.Password)
+				if nci.ConsoleEntryCommand != "" {
+					// Encode the entry command in base64 to avoid issues with special characters, conman can't handle escaping quotes
+					base64EncodedCmd := base64.StdEncoding.EncodeToString([]byte(nci.ConsoleEntryCommand))
+					devArgs = fmt.Sprintf("%s %s", devArgs, base64EncodedCmd)
+				}
+				output := fmt.Sprintf("console name=\"%s\" dev=\"%s\"\n", nci.ID, devArgs)
 				consoles = append(consoles, output)
 			} else {
 				// Key based auth, note that we still use the username from the secure store
-				slog.Debug("Configuring SSH console with key", "nodeID", nci.ID, "host", nci.ConnectionHost, "port", nci.ConnectionPort, "username", creds.Username, "keyPath", sshConsoleKeyPath)
-				output := fmt.Sprintf("console name=\"%s\" dev=\"%s/ssh-key-console %s %d %s %s\"\n",
-					nci.ID, cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath)
+				slog.Debug("Configuring SSH console with key", "nodeID", nci.ID, "host", nci.ConnectionHost, "port", nci.ConnectionPort, "username", creds.Username, "keyPath", sshConsoleKeyPath, "entryCmd", nci.ConsoleEntryCommand)
+				devArgs := fmt.Sprintf("%s/ssh-key-console %s %d %s %s", cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath)
+				if nci.ConsoleEntryCommand != "" {
+					// Encode the entry command in base64 to avoid issues with special characters, conman can't handle escaping quotes
+					base64EncodedCmd := base64.StdEncoding.EncodeToString([]byte(nci.ConsoleEntryCommand))
+					devArgs = fmt.Sprintf("%s %s", devArgs, base64EncodedCmd)
+				}
+				output := fmt.Sprintf("console name=\"%s\" dev=\"%s\"\n", nci.ID, devArgs)
 				consoles = append(consoles, output)
 			}
 		}

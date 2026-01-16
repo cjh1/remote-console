@@ -88,6 +88,8 @@ func (s *IntegrationTestSuite) TestLogAggregation() {
 
 		tailConn, tailResp, err := s.dialWebSocket(followURL)
 		s.Require().NoError(err)
+		defer tailResp.Body.Close()
+		defer tailConn.Close()
 
 		if console.readyLogMarker != "" {
 			_, err = s.readWebSocketUntil(tailConn, console.readyLogMarker, tailMessageTimeout)
@@ -100,7 +102,7 @@ func (s *IntegrationTestSuite) TestLogAggregation() {
 		s.T().Logf("Sent aggregation message to %s (exit code %d): %s", console.name, exitCode, output)
 
 		_, err = s.readWebSocketUntil(tailConn, msg, tailMessageTimeout)
-		s.Require().NoError(err, "tail should see aggregation message")
+		s.Require().NoError(err, "tail should see broadcast message")
 
 		entry, err := s.waitForAggLogEntry(aggPath, msg, 90*time.Second)
 		s.Require().NoErrorf(err, "expected aggregation log to contain %q", msg)
