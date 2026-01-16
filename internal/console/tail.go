@@ -3,7 +3,6 @@ package console
 import (
 	"bufio"
 	"container/ring"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -30,7 +29,7 @@ type consoleTailSession struct {
 	rateLimiter     *ratelimiter.LeakyBucket // Rate limit console output
 }
 
-func newConsoleTailSession(ctx context.Context, consoleLogsPath string, nodeID string, conn *websocket.Conn) *consoleTailSession {
+func newConsoleTailSession(consoleLogsPath string, nodeID string, conn *websocket.Conn) *consoleTailSession {
 	cts := &consoleTailSession{
 		nodeID:          nodeID,
 		consoleLogsPath: consoleLogsPath,
@@ -285,8 +284,6 @@ func (cts *consoleTailSession) tailConsole(follow bool, numLines int) {
 }
 
 func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
 	// Make sure the request is cleaned up
 	defer drainAndCloseRequestBody(r)
 
@@ -336,7 +333,7 @@ func doTailConsole(consoleLogsPath string, w http.ResponseWriter, r *http.Reques
 	slog.Info("Client connected for node tail", "remoteAddr", conn.RemoteAddr().String(), "nodeID", nodeID)
 
 	// From here on, errors must be sent via WebSocket close frames
-	session := newConsoleTailSession(ctx, consoleLogsPath, nodeID, conn)
+	session := newConsoleTailSession(consoleLogsPath, nodeID, conn)
 	if session == nil {
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error starting console tail session"))

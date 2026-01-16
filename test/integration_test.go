@@ -389,6 +389,7 @@ func (s *IntegrationTestSuite) readWebSocketMessages(wsConn *websocket.Conn, tim
 	wsConn.SetReadDeadline(time.Now().Add(timeout))
 
 	var output strings.Builder
+	logger := s.newConsoleMessageLogger()
 	messageCount := 0
 	start := time.Now()
 	for {
@@ -407,7 +408,7 @@ func (s *IntegrationTestSuite) readWebSocketMessages(wsConn *websocket.Conn, tim
 		}
 
 		msgStr := string(message)
-		s.T().Logf("Console: %s", msgStr)
+		logger.LogChunk(msgStr)
 		output.WriteString(msgStr)
 		messageCount++
 	}
@@ -418,6 +419,7 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 	wsConn.SetReadDeadline(time.Now().Add(timeout))
 
 	var output strings.Builder
+	logger := s.newConsoleMessageLogger()
 	for {
 		_, message, err := wsConn.ReadMessage()
 		if err != nil {
@@ -426,11 +428,34 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 		}
 
 		msgStr := string(message)
-		s.T().Logf("Console: %s", msgStr)
+		logger.LogChunk(msgStr)
 		output.WriteString(msgStr)
 		if strings.Contains(output.String(), searchString) {
 			return output.String(), nil
 		}
+	}
+}
+
+// consoleMessageLogger buffers partial WebSocket chunks and logs complete lines.
+type consoleMessageLogger struct {
+	t     *testing.T
+	buffer string
+}
+
+func (s *IntegrationTestSuite) newConsoleMessageLogger() *consoleMessageLogger {
+	return &consoleMessageLogger{t: s.T()}
+}
+
+func (l *consoleMessageLogger) LogChunk(chunk string) {
+	l.buffer += chunk
+	for {
+		idx := strings.IndexByte(l.buffer, '\n')
+		if idx == -1 {
+			return
+		}
+		line := strings.TrimSuffix(l.buffer[:idx], "\r")
+		l.t.Logf("Console: %s", line)
+		l.buffer = l.buffer[idx+1:]
 	}
 }
 

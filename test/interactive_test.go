@@ -21,6 +21,7 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 	defer wsConn.SetReadDeadline(time.Time{})
 
 	var output strings.Builder
+	logger := s.newConsoleMessageLogger()
 
 	for {
 
@@ -37,7 +38,7 @@ func (s *IntegrationTestSuite) waitForConsolePrompt(wsConn *websocket.Conn, sear
 		}
 
 		msgStr := string(message)
-		s.T().Logf("Console: %s", msgStr)
+		logger.LogChunk(msgStr)
 		output.WriteString(msgStr)
 		if strings.Contains(output.String(), searchString) {
 			return output.String(), nil
