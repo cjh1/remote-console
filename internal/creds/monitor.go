@@ -62,7 +62,7 @@ func (cs *credsService) checkIfPasswordsChanged(xnames []string) (bool, error) {
 			slog.Warn("Missing credentials detected while checking for credential changes", "xname", xname)
 			continue
 		}
-		previousCreds, _ := cs.previousPasswords[xname]
+		previousCreds := cs.previousPasswords[xname]
 
 		if (currentCreds.Username != previousCreds.Username) || (currentCreds.Password != previousCreds.Password) {
 			slog.Info("Change detected in the passwords. Conman will be reconfigured.")

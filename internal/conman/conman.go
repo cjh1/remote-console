@@ -75,7 +75,7 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 
 	bs, err := generateBaseConfig(cs.config)
 	if err != nil {
-		return false, fmt.Errorf("Unable to template base config file: %w", err)
+		return false, fmt.Errorf("unable to template base config file: %w", err)
 	}
 
 	if !forceUpdate && !willUpdateConfig(bs) {
@@ -86,13 +86,13 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 	slog.Debug("Opening conman configuration file for output", "path", cs.config.ConfFilePath)
 	cf, err := os.OpenFile(cs.config.ConfFilePath, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
-		return false, fmt.Errorf("Unable to open config file to write: %w", err)
+		return false, fmt.Errorf("unable to open config file to write: %w", err)
 	}
 	defer cf.Close()
 
 	_, err = cf.Write(bs)
 	if err != nil {
-		return false, fmt.Errorf("Unable to write base config into file: %w", err)
+		return false, fmt.Errorf("unable to write base config into file: %w", err)
 	}
 
 	slog.Info("Populating conman configuration with nodes", "nodeCount", len(nodeMap))
@@ -149,7 +149,7 @@ func (cs *conmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 	sort.Strings(consoles)
 	for _, output := range consoles {
 		if _, err = cf.WriteString(output); err != nil {
-			return false, fmt.Errorf("Unable to write console entry into file: %w", err)
+			return false, fmt.Errorf("unable to write console entry into file: %w", err)
 		}
 	}
 
@@ -215,23 +215,23 @@ func logPipeOutput(readPipe *io.ReadCloser, desc string) {
 func (cs *conmanService) ExecuteConman() error {
 	slog.Info("Starting new instance of conmand")
 	if cs.command != nil {
-		return fmt.Errorf("command not nil on entry to executeConman!!")
+		return fmt.Errorf("command not nil on entry to executeConman")
 	}
 	cs.command = exec.Command("conmand", "-F", "-v", "-c", cs.config.ConfFilePath)
 	cmdStdErr, err := cs.command.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("Unable to connect to conmand stderr pipe: %w", err)
+		return fmt.Errorf("unable to connect to conmand stderr pipe: %w", err)
 	}
 	cmdStdOut, err := cs.command.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("Unable to connect to conmand stdout pipe: %w", err)
+		return fmt.Errorf("unable to connect to conmand stdout pipe: %w", err)
 	}
 	go logPipeOutput(&cmdStdErr, "stderr")
 	go logPipeOutput(&cmdStdOut, "stdout")
 
 	slog.Info("Starting conmand process")
 	if err = cs.command.Start(); err != nil {
-		return fmt.Errorf("Unable to start the command: %w", err)
+		return fmt.Errorf("unable to start command: %w", err)
 	}
 
 	if err = cs.command.Wait(); err != nil {

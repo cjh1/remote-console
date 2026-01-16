@@ -132,15 +132,15 @@ func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
 	if config.SecureStorageAdapter == StorageAdapterVault {
 		ss, err = sstorage.NewVaultAdapterAs(config.VaultBasePath, config.VaultRole)
 		if err != nil {
-			return nil, fmt.Errorf("unable to create vault secure storage adapter: %#v\n", err)
+			return nil, fmt.Errorf("unable to create vault secure storage adapter: %w", err)
 		}
 	} else if config.SecureStorageAdapter == StorageAdapterLocal {
 		ss, err = sstorage.NewLocalSecretStore(config.LocalStoreKey, config.LocalStoreFilePath, false)
 		if err != nil {
-			return nil, fmt.Errorf("unable to create local file secure storage adapter: %#v\n", err)
+			return nil, fmt.Errorf("unable to create local file secure storage adapter: %w", err)
 		}
 	} else {
-		return nil, fmt.Errorf("invalid secure storage adapter type: %s\n", config.SecureStorageAdapter)
+		return nil, fmt.Errorf("invalid secure storage adapter type: %s", config.SecureStorageAdapter)
 	}
 
 	return ss, nil
@@ -150,13 +150,13 @@ func createSecureStorage(config CredsConfig) (sstorage.SecureStorage, error) {
 func getPasswords(config CredsConfig, bmcXNames []string) (map[string]compcreds.CompCredentials, error) {
 	ss, err := createSecureStorage(config)
 	if err != nil {
-		return nil, fmt.Errorf("error creating secure storage adapter %#v\n", err)
+		return nil, fmt.Errorf("error creating secure storage adapter: %w", err)
 	}
 
 	ccs := compcreds.NewCompCredStore(config.SecureStoragePasswordsPath, ss)
 	ccreds, err := ccs.GetCompCreds(bmcXNames)
 	if err != nil {
-		return nil, fmt.Errorf("error create comp creds store: %#v\n", err)
+		return nil, fmt.Errorf("error creating comp creds store: %w", err)
 	}
 
 	return ccreds, nil
@@ -190,13 +190,13 @@ func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 
 	newHash, err := HashString(consoleKeys.PrivateKey)
 	if err != nil {
-		return false, fmt.Errorf("failed to hash the private ssh key received from Vault. %w", err)
+		return false, fmt.Errorf("failed to hash private ssh key received from vault: %w", err)
 	} else if cs.previousPrivateKeyHash == nil || !(bytes.Equal(newHash, cs.previousPrivateKeyHash)) {
 		retVal = true
 		cs.previousPrivateKeyHash = newHash
 		err = os.WriteFile(cs.config.SshConsoleKeyPath, []byte(consoleKeys.PrivateKey), 0600)
 		if err != nil {
-			return false, fmt.Errorf("failed to write our the private ssh key received from Vault. Err: %w", err)
+			return false, fmt.Errorf("failed to write private ssh key received from vault: %w", err)
 		}
 		slog.Info("Console ssh key file created")
 	} else {
@@ -213,7 +213,7 @@ func (cs *credsService) EnsureConsoleKeysPresent() (bool, error) {
 			sshConsoleCertPath := cs.config.SshConsoleKeyPath + "-cert.pub"
 			err = os.WriteFile(sshConsoleCertPath, []byte(*consoleKeys.Certificate), 0644)
 			if err != nil {
-				return false, fmt.Errorf("failed to write our the public ssh cert %w", err)
+				return false, fmt.Errorf("failed to write public ssh cert: %w", err)
 			}
 			slog.Info("Console ssh cert file created")
 		} else {

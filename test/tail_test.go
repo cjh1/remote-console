@@ -29,6 +29,8 @@ func (s *IntegrationTestSuite) TestConsoleTail() {
 
 			// Send a message to the console and verify it's seen in the tail
 			wsURL, err := s.tailWebSocketURL(console.nodeID, nil)
+			s.Require().NoError(err)
+
 			msg := makeUnique("tail-basic" + console.name)
 			exitCode, output, err := s.broadcastConsoleMessage(console, msg)
 			s.Require().NoError(err)
@@ -338,3 +340,4 @@ func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
 		s.T().Logf("Got expected 404 status for invalid node %s", invalidNodeID)
 	}
 }
+

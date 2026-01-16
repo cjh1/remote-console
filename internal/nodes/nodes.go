@@ -108,33 +108,6 @@ var currNodesMutex = &sync.Mutex{}
 // CurrentNodes is the map of all nodes being monitored
 var currentNodes map[string]*NodeConsoleInfo = make(map[string]*NodeConsoleInfo)
 
-// redfishEndpoint holds HSM redfish endpoint information
-type redfishEndpoint struct {
-	ID       string
-	Type     string
-	FQDN     string
-	User     string
-	Password string
-}
-
-// String returns a string representation with password redacted
-func (re redfishEndpoint) String() string {
-	return fmt.Sprintf("ID:%s, Type:%s, FQDN:%s, User:%s, Password:REDACTED", re.ID, re.Type, re.FQDN, re.User)
-}
-
-// stateComponent holds HSM state component information
-type stateComponent struct {
-	ID    string
-	Type  string
-	Class string `json:",omitempty"`
-	NID   int    `json:",omitempty"` // NOTE: NID value only valid if Role="Compute"
-	Role  string `json:",omitempty"`
-}
-
-// String returns a string representation
-func (sc stateComponent) String() string {
-	return fmt.Sprintf("ID:%s, Type:%s, Class:%s, NID:%d, Role:%s", sc.ID, sc.Type, sc.Class, sc.NID, sc.Role)
-}
 
 // getComponentEndpoints queries HSM for the component endpoints
 func getComponentEndpoints(ctx context.Context, httpClient *http.Client, smdURL string) ([]componentEndpoint, error) {

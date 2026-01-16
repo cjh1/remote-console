@@ -122,15 +122,15 @@ func logRotate(ctx context.Context, config remoteConsoleConfig, conmanService Co
 	// Create the log rotation configuration file
 	logsService.UpdateLogRotateConf(conmanLogsPath, nodes.CurrentNodes())
 
-	sleepSecs := time.Duration(300) * time.Second
+	sleepDuration := 300 * time.Second
 	logRotCheckFreqSec := logConfig.LogRotateCheckFrequency
 	if logRotCheckFreqSec > 0 {
-		sleepSecs = time.Duration(logRotCheckFreqSec) * time.Second
+		sleepDuration = time.Duration(logRotCheckFreqSec) * time.Second
 	} else {
 		slog.Warn("Log rotation frequency invalid, defaulting to 5 min", "inputValue", logRotCheckFreqSec)
 	}
 
-	ticker := time.NewTicker(sleepSecs)
+	ticker := time.NewTicker(sleepDuration)
 	defer ticker.Stop()
 
 	for {
@@ -349,7 +349,6 @@ func runService(config remoteConsoleConfig) error {
 	// Listen for syscall signals for process to interrupt/quit
 	go func() {
 		sig := <-sigs
-		inShutdown = true
 		slog.Info("Detected signal to close service", "signal", sig)
 
 		// Cancel service context to stop background goroutines

@@ -33,10 +33,6 @@ import (
 	"strings"
 )
 
-var (
-	inShutdown bool = false
-)
-
 func main() {
 	initLogger()
 

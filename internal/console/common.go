@@ -28,7 +28,7 @@ func extractNodeId(r *http.Request) (string, error) {
 	nodeID := chi.URLParam(r, "nodeID")
 	if nodeID == "" {
 		slog.Error("Failed to extract node ID from request", "path", r.URL.Path)
-		return "", fmt.Errorf("Unable to extract Node ID")
+		return "", fmt.Errorf("unable to extract node ID")
 	}
 
 	return nodeID, nil
