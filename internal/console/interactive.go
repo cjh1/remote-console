@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	
+	"golang.org/x/sys/unix"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
 	"github.com/creack/pty"
@@ -82,7 +84,12 @@ func (s *interactiveConsoleSession) Close() {
 // This runs in a loop, monitoring each new process after successful reconnection
 func (s *interactiveConsoleSession) monitorProcess(ctx context.Context) {
 	for {
-		<-s.processExited
+		select {
+		case <-s.processExited:
+		case <-ctx.Done():
+			slog.Info("Session closing, stopping monitor for console", "nodeID", s.nodeID)
+			return
+		}
 		slog.Info("Conman process exited for console", "nodeID", s.nodeID)
 
 		// Wait before reconnecting to prevent tight loop
@@ -92,6 +99,13 @@ func (s *interactiveConsoleSession) monitorProcess(ctx context.Context) {
 		case <-ctx.Done():
 			slog.Info("Session closing during reconnect delay, stopping monitor for console", "nodeID", s.nodeID)
 			return
+		}
+
+		select {
+		case <-ctx.Done():
+			slog.Info("Session closing, skipping reconnect for console", "nodeID", s.nodeID)
+			return
+		default:
 		}
 
 		// Check if the node still exists (might have been updated/changed)
@@ -189,6 +203,25 @@ func isEIO(err error) bool {
 	return false
 }
 
+
+// waitForPTYReadable waits until the PTY file descriptor is readable or timeout occurs
+func waitForPTYReadable(fd int, timeout time.Duration) (bool, error) {
+	var readSet unix.FdSet
+	readSet.Zero()
+	readSet.Set(fd) 
+
+	tv := unix.NsecToTimeval(timeout.Nanoseconds())
+	n, err := unix.Select(fd+1, &readSet, nil, nil, &tv)
+	if err != nil {
+		if errors.Is(err, syscall.EINTR) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return n > 0, nil
+}
+
 // streamOutput reads from PTY and writes to WebSocket
 func (s *interactiveConsoleSession) streamOutput(ctx context.Context) {
 	defer s.wg.Done()
@@ -198,17 +231,33 @@ func (s *interactiveConsoleSession) streamOutput(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.ws.Done():
+			return
 		default:
 		}
 
 		s.ptmxMutex.RLock()
-		if s.ptmx == nil {
+		ptmx := s.ptmx
+		if ptmx == nil {
 			s.ptmxMutex.RUnlock()
 			slog.Debug("PTY is nil, exiting streamOutput for console", "nodeID", s.nodeID)
 			return
 		}
+		fd := int(ptmx.Fd())
 
-		n, err := s.ptmx.Read(buf)
+		// Wait for PTY to be readable with timeout, to allow checking for context cancellation, otherwise Read may block indefinitely
+		ready, err := waitForPTYReadable(fd, 250*time.Millisecond)
+		if err != nil {
+			s.ptmxMutex.RUnlock()
+			slog.Error("PTY read wait failed", "nodeID", s.nodeID, "error", err)
+			return
+		}
+		if !ready {
+			s.ptmxMutex.RUnlock()
+			continue
+		}
+
+		n, err := ptmx.Read(buf)
 		s.ptmxMutex.RUnlock()
 		if err != nil {
 			// Don't log I/O errors - they're expected when the process is killed
@@ -245,6 +294,16 @@ func (s *interactiveConsoleSession) streamInput(ctx context.Context) {
 	s.ws.configureReadDeadlines()
 
 	for {
+		select {
+		// Check for session closure
+		case <-ctx.Done():
+			return
+		// Check for WebSocket closure
+		case <-s.ws.Done():
+			return
+		default:
+		}
+
 		messageType, message, err := s.ws.Read()
 		if err != nil {
 			// Check if it's an unexpected close (not normal, going away, or abnormal)
