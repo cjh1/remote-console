@@ -108,7 +108,6 @@ var currNodesMutex = &sync.Mutex{}
 // CurrentNodes is the map of all nodes being monitored
 var currentNodes map[string]*NodeConsoleInfo = make(map[string]*NodeConsoleInfo)
 
-
 // getComponentEndpoints queries HSM for the component endpoints
 func getComponentEndpoints(ctx context.Context, httpClient *http.Client, smdURL string) ([]componentEndpoint, error) {
 	var response componentEndpoints

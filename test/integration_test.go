@@ -328,11 +328,11 @@ func (s *IntegrationTestSuite) TestConsoles() {
 			ConnectionPort: 0,
 		},
 		{
-			ID:             "x0c0s0b0n0",
-			ConnectionType: "ssh",
-			ConnectionHost: "x0c0s0b0",
-			ConnectionPort: 0,
-		ConsoleEntryCommand: "echo 'Hello n0' && /bin/sh",
+			ID:                  "x0c0s0b0n0",
+			ConnectionType:      "ssh",
+			ConnectionHost:      "x0c0s0b0",
+			ConnectionPort:      0,
+			ConsoleEntryCommand: "echo 'Hello n0' && /bin/sh",
 		},
 		{
 			ID:             "x0c0s1b0",
@@ -341,11 +341,11 @@ func (s *IntegrationTestSuite) TestConsoles() {
 			ConnectionPort: 0,
 		},
 		{
-			ID:             "x0c0s1b0n0",
-			ConnectionType: "ssh",
-			ConnectionHost: "x0c0s1b0",
-			ConnectionPort: 0,
-		ConsoleEntryCommand: "echo 'Hello n0' && /bin/sh",
+			ID:                  "x0c0s1b0n0",
+			ConnectionType:      "ssh",
+			ConnectionHost:      "x0c0s1b0",
+			ConnectionPort:      0,
+			ConsoleEntryCommand: "echo 'Hello n0' && /bin/sh",
 		},
 		{
 			ID:             "x0c0s2b0",
@@ -438,7 +438,7 @@ func (s *IntegrationTestSuite) readWebSocketUntil(wsConn *websocket.Conn, search
 
 // consoleMessageLogger buffers partial WebSocket chunks and logs complete lines.
 type consoleMessageLogger struct {
-	t     *testing.T
+	t      *testing.T
 	buffer string
 }
 

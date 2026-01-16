@@ -12,7 +12,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	
+
 	"golang.org/x/sys/unix"
 
 	"github.com/OpenCHAMI/remote-console/internal/nodes"
@@ -203,12 +203,11 @@ func isEIO(err error) bool {
 	return false
 }
 
-
 // waitForPTYReadable waits until the PTY file descriptor is readable or timeout occurs
 func waitForPTYReadable(fd int, timeout time.Duration) (bool, error) {
 	var readSet unix.FdSet
 	readSet.Zero()
-	readSet.Set(fd) 
+	readSet.Set(fd)
 
 	tv := unix.NsecToTimeval(timeout.Nanoseconds())
 	n, err := unix.Select(fd+1, &readSet, nil, nil, &tv)

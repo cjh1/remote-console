@@ -3,6 +3,7 @@ package console
 import (
 	"bufio"
 	"container/ring"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +13,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"context"
 
 	"github.com/gorilla/websocket"
 	"github.com/nxadm/tail"
@@ -197,22 +197,22 @@ func (cts *consoleTailSession) tailConsole(ctx context.Context, follow bool, num
 
 				// Apply rate limiting (convert bytes to KB, rounded up)
 				kb := uint16((len(lineText) + 1023) / 1024)
-			for !cts.rateLimiter.Pour(kb) {
-				slog.Debug("Rate limit reached for tail (history), waiting for capacity", "nodeID", cts.nodeID)
-				time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
-			}
+				for !cts.rateLimiter.Pour(kb) {
+					slog.Debug("Rate limit reached for tail (history), waiting for capacity", "nodeID", cts.nodeID)
+					time.Sleep(100 * time.Millisecond) // Wait for bucket to drain
+				}
 
-			select {
-			case <-ctx.Done():
-				slog.Debug("Context canceled while sending history", "nodeID", cts.nodeID)
-				cts.close()
-				return
-			default:
-			}
+				select {
+				case <-ctx.Done():
+					slog.Debug("Context canceled while sending history", "nodeID", cts.nodeID)
+					cts.close()
+					return
+				default:
+				}
 
-			err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
-			if err != nil {
-				slog.Error("Failed to send lines", "error", err, "nodeID", cts.nodeID)
+				err := cts.ws.Write(websocket.TextMessage, []byte(lineText))
+				if err != nil {
+					slog.Error("Failed to send lines", "error", err, "nodeID", cts.nodeID)
 					cts.ws.Write(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Error sending console log"))
 					cts.close()

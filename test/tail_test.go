@@ -340,4 +340,3 @@ func (s *IntegrationTestSuite) TestConsoleTailInvalidNode() {
 		s.T().Logf("Got expected 404 status for invalid node %s", invalidNodeID)
 	}
 }
-
