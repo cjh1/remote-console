@@ -100,7 +100,10 @@ type webSocketConsole struct {
 	ConsoleURI     string `json:"ConsoleURI"`
 }
 
-var hardwareUpdateTime string = "Unknown"
+var (
+	hardwareUpdateTime   string = "Unknown"
+	hardwareUpdateTimeMutex sync.RWMutex
+)
 
 // CurrNodesMutex protects access to CurrentNodes
 var currNodesMutex = &sync.Mutex{}
@@ -263,7 +266,9 @@ func updateNodes(nodes []NodeConsoleInfo) bool {
 }
 
 func CheckForUpdates(ctx context.Context, httpClient *http.Client, smdURL string) bool {
+	hardwareUpdateTimeMutex.Lock()
 	hardwareUpdateTime = time.Now().Format(time.RFC3339)
+	hardwareUpdateTimeMutex.Unlock()
 
 	slog.Info("Getting current nodes from HSM")
 	// keep track of if we need to redo the configuration
@@ -307,5 +312,7 @@ func IsCurrentNode(nodeID string) bool {
 }
 
 func GetHardwareUpdateTime() string {
+	hardwareUpdateTimeMutex.RLock()
+	defer hardwareUpdateTimeMutex.RUnlock()
 	return hardwareUpdateTime
 }
