@@ -2,7 +2,9 @@ package test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -257,6 +259,94 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 	s.T().Logf("Hostname output after reconnection: %s", hostnameOutput2)
 
 	s.T().Log("Reconnection test completed successfully")
+}
+
+func (s *IntegrationTestSuite) TestConsoleInteractiveClientClose() {
+	console := consoleFixtures["ssh-password"]
+	promptTimeout := 90 * time.Second
+
+	wsConn, resp, err := s.connectInteractiveConsole(console.nodeID, console.prompt, promptTimeout)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+
+	_ = wsConn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "client closing"))
+	wsConn.Close()
+
+	time.Sleep(2 * time.Second)
+
+	wsConn, resp, err = s.connectInteractiveConsole(console.nodeID, console.prompt, promptTimeout)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
+	s.Require().NoError(err, "Error sending hostname command")
+
+	expectedHostLine := console.nodeID + "\r\n"
+	hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output from console after reconnect")
+	s.Require().Contains(hostnameOutput, expectedHostLine, "Expected hostname in output")
+}
+
+func (s *IntegrationTestSuite) TestConsoleInteractiveServerClose() {
+	promptTimeout := 90 * time.Second
+	newNodeID := "x0c0s10b1"
+	console := consoleFixtures["ssh-password"]
+
+	authConfig := defaultAuthConfig
+	rfContainer, err := startRedfishEmulator(context.Background(), s.rfNetwork.Name, newNodeID, "ssh", &authConfig)
+	s.Require().NoError(err)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := rfContainer.Terminate(ctx); err != nil {
+			s.T().Logf("Warning: failed to terminate Redfish emulator %s: %v", newNodeID, err)
+		}
+	}()
+
+	sshContainer, err := startSSHPasswordServer(context.Background(), s.consoleNetwork.Name, newNodeID, "ADMIN", "ADMIN")
+	s.Require().NoError(err)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := sshContainer.Terminate(ctx); err != nil {
+			s.T().Logf("Warning: failed to terminate SSH container %s: %v", newNodeID, err)
+		}
+	}()
+
+	smdAPIURL, err := getSMDAPIURL(context.Background(), s.containers["smd"])
+	s.Require().NoError(err)
+
+	err = loadRedfishEndpoints(context.Background(), smdAPIURL, []redfishEndpoint{{
+		Host:     newNodeID,
+		Username: "ADMIN",
+		Password: "ADMIN",
+	}})
+	s.Require().NoError(err, "failed to register Redfish endpoint")
+
+	wsConn, resp, err := s.connectInteractiveConsole(newNodeID, console.prompt, promptTimeout)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	defer wsConn.Close()
+
+	err = deleteRedfishEndpoint(context.Background(), smdAPIURL, newNodeID)
+	s.Require().NoError(err, "failed to remove Redfish endpoint")
+
+	s.Require().NoError(s.waitForConsoleRemoval(newNodeID, 3*time.Minute), "remote-console did not drop removed console")
+
+	readDeadline := time.Now().Add(5 * time.Second)
+	wsConn.SetReadDeadline(readDeadline)
+	_, _, err = wsConn.ReadMessage()
+	if err != nil {
+		var closeErr *websocket.CloseError
+		if !errors.As(err, &closeErr) && !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+			var netErr net.Error
+			if !errors.As(err, &netErr) || !netErr.Timeout() {
+				s.T().Fatalf("Unexpected websocket read error after endpoint removal: %v", err)
+			}
+		}
+	}
 }
 
 func (s *IntegrationTestSuite) TestConsoleInteractiveInvalidNode() {
