@@ -1,0 +1,21 @@
+name: integration tests
+on:
+  - push
+  - pull_request
+  - workflow_dispatch
+jobs:
+  integration_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build remote-console binary for Dockerfile
+        run: |
+          go build -o remote-console ./cmd/remote-console
+      - name: Run integration tests
+        run: |
+          go test ./test -timeout 20m ./test

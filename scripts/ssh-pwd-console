@@ -28,22 +28,43 @@
 # Usage and examples below assume this script's name is
 # ssh-pwd-console and located on the system under /usr/bin
 #
-# Usage: ssh-console xname
-#  Example: ssh-pwd-console x5000c3s6b0n0 USER PASSWORD
+# Usage: ssh-console xname port user password [entrycmd]
+#  Example: ssh-pwd-console x5000c3s6b0n0 22 USER PASSWORD
+#  Example: ssh-pwd-console x5000c3s6b0n0 22 USER PASSWORD "console"
 #
 # Example /etc/conman.conf entry:
-# console name="x3000c0s33b4n0" dev="/app/ssh-pwd-console x3000c0s33b4 USER PASSWORD"
+# console name="x3000c0s33b4n0" dev="/app/ssh-pwd-console x3000c0s33b4 22 USER PASSWORD"
+# console name="x3000c0s33b4n0" dev="/app/ssh-pwd-console x3000c0s33b4 22 USER PASSWORD console"
 #
 
 set env(TERM) xterm
 
 set timeout -1
 set bmc [lindex $argv 0]
-set usr [lindex $argv 1]
-set paswd [lindex $argv 2]
+set port [lindex $argv 1]
+set usr [lindex $argv 2]
+set paswd [lindex $argv 3]
+set entrycmd_encoded [lindex $argv 4]
+
+# Decode base64 encoded entry command
+set entrycmd ""
+if {$entrycmd_encoded != ""} {
+    set entrycmd [exec echo $entrycmd_encoded | base64 -d]
+}
+
+# Default port to 22 if not provided
+if {$port == 0} {
+    set port 22
+}
+
+# Build SSH command with optional entry command
+set ssh_cmd [list ssh -p $port -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $usr@$bmc]
+if {$entrycmd != ""} {
+    lappend ssh_cmd $entrycmd
+}
 
 # connect to an ssh session
-set pid [spawn ssh -p 2200 -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no $usr@$bmc ]
+set pid [spawn {*}$ssh_cmd]
 
 # reply with the password when challenged
 expect "password: "

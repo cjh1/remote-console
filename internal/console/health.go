@@ -28,22 +28,34 @@ package console
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
-)
 
-type HealthService interface {
-	doLiveness(w http.ResponseWriter, r *http.Request)
-	doHealth(w http.ResponseWriter, r *http.Request)
-	doReadiness(w http.ResponseWriter, r *http.Request)
-	getCurrentHealth() HealthResponse
-}
+	"github.com/OpenCHAMI/remote-console/internal/nodes"
+)
 
 // HealthResponse - used to report service health stats
 type HealthResponse struct {
 	NumberConsoles     string `json:"consoles"`
 	HardwareUpdateSec  string `json:"hardwareupdatesec"`
 	LastHardwareUpdate string `json:"hardwareupdate"`
+}
+
+type errorResponse struct {
+	E      int    `json:"e"`
+	ErrMsg string `json:"err_msg"`
+}
+
+func sendJSONError(w http.ResponseWriter, ecode int, message string) {
+	httpCode := ecode
+	if ecode >= 200 && ecode <= 299 {
+		ecode = 0
+	}
+	data := errorResponse{
+		E:      ecode,
+		ErrMsg: message,
+	}
+	sendResponseJSON(w, httpCode, data)
 }
 
 // Debugging information query
@@ -63,19 +75,17 @@ func doHealth(w http.ResponseWriter, r *http.Request) {
 	stats := getCurrentHealth()
 
 	// log the query
-	log.Printf("Health check: %s", stats)
+	slog.Debug("Health check", "consoles", stats.NumberConsoles, "lastUpdate", stats.LastHardwareUpdate)
 
 	// write the output
-	SendResponseJSON(w, http.StatusOK, stats)
-	return
+	sendResponseJSON(w, http.StatusOK, stats)
 }
 
 // Fill out the current status of a HealthResponse object
 func getCurrentHealth() HealthResponse {
 	var stats HealthResponse
-	stats.HardwareUpdateSec = fmt.Sprintf("%d", newHardwareCheckPeriodSec)
-	stats.LastHardwareUpdate = hardwareUpdateTime
-	stats.NumberConsoles = fmt.Sprintf("%d", len(nodeCache))
+	stats.LastHardwareUpdate = nodes.GetHardwareUpdateTime()
+	stats.NumberConsoles = fmt.Sprintf("%d", len(nodes.CurrentNodes()))
 	return stats
 }
 

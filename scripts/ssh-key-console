@@ -27,18 +27,42 @@
 # Usage and examples below assume this script's name is
 # ssh-console and located on the system under /usr/bin
 #
-# Usage: ssh-console xname
-#  Example: ssh-console x5000c3s6b0n0
+# Usage: ssh-console xname port user keypath [entrycmd]
+#  Example: ssh-console x5000c3s6b0n0 2222 admin /path/to/sshkey
+#  Example: ssh-console x5000c3s6b0n0 2222 admin /path/to/sshkey "console"
 #
 # Example /etc/conman.conf entry:
-# console name="x5000c3s6b0n0" dev="/usr/bin/ssh-console x5000c3s6b0n0"
+# console name="x5000c3s6b0n0" dev="/usr/bin/ssh-console x5000c3s6b0n0 2222 admin /path/to/key"
+# console name="x5000c3s6b0n0" dev="/usr/bin/ssh-console x5000c3s6b0n0 2222 admin /path/to/key console"
 #
 
 set env(TERM) xterm
-set controller [string range [lindex $argv 0] 0 end-2]
-set session [string range [lindex $argv 0] end-1 end]
+set bmc [lindex $argv 0]
+set port [lindex $argv 1]
+set usr [lindex $argv 2]
+set keypath [lindex $argv 3]
+set entrycmd_encoded [lindex $argv 4]
 set timeout -1
-set pid [spawn ssh -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i /var/log/console/conman.key $session@$controller]
+
+# Decode base64 encoded entry command
+set entrycmd ""
+if {$entrycmd_encoded != ""} {
+    set entrycmd [exec echo $entrycmd_encoded | base64 -d]
+}
+
+# Default port to 22 if not provided
+if {$port == 0} {
+    set port 22
+}
+
+# Build SSH command with optional entry command
+set ssh_cmd [list ssh -p $port -o ServerAliveInterval=180 -o ServerAliveCountMax=5 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i $keypath $usr@$bmc]
+if {$entrycmd != ""} {
+    lappend ssh_cmd $entrycmd
+}
+
+set pid [spawn {*}$ssh_cmd]
+
 exit -onexit {
   exec kill $pid
   wait $pid
