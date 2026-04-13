@@ -11,6 +11,7 @@ import (
 	"github.com/OpenCHAMI/remote-console/internal/conman"
 	"github.com/OpenCHAMI/remote-console/internal/creds"
 	"github.com/OpenCHAMI/remote-console/internal/logs"
+	"github.com/OpenCHAMI/remote-console/internal/ssh"
 )
 
 type OAuth2Config struct {
@@ -24,6 +25,7 @@ type remoteConsoleConfig struct {
 	Log                  logs.LogConfig `flag:"-"`
 	Conman               conman.ConmanConfig
 	Creds                creds.CredsConfig
+	SSH                  ssh.SSHConfig
 	HttpListen           string `desc:"HTTP listen address"`
 	NewNodeLookup        int    `desc:"Interval in seconds to look for new nodes"`
 	CredsMonitorInterval int    `desc:"Interval in seconds to monitor credential updates"`
@@ -38,6 +40,7 @@ func DefaultConfig() remoteConsoleConfig {
 		Log:                  logs.DefaultLogConfig(),
 		Conman:               conman.DefaultConmanConfig(),
 		Creds:                creds.DefaultCredsConfig(),
+		SSH:                  ssh.DefaultSSHConfig(),
 		HttpListen:           "0.0.0.0:26776",
 		NewNodeLookup:        120,
 		CredsMonitorInterval: 30,

@@ -10,7 +10,6 @@ package conman
 import (
 	"bufio"
 	"bytes"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -101,27 +100,6 @@ func generateIPMIConsoleConfig(nci *nodes.NodeConsoleInfo, creds compcredentials
 		nci.ID, nci.ConnectionHost, creds.Username, creds.Password)
 }
 
-func (cs *ConmanService) generateSSHConsoleConfig(nci *nodes.NodeConsoleInfo, creds compcredentials.CompCredentials, sshConsoleKeyPath string) string {
-	var devArgs string
-
-	// If we have password creds, use those, otherwise use key-based.
-	if creds.Password != "" {
-		slog.Debug("Configuring SSH console with password", "nodeID", nci.ID, "host", nci.ConnectionHost, "port", nci.ConnectionPort, "username", creds.Username, "entryCmd", nci.ConsoleEntryCommand)
-		devArgs = fmt.Sprintf("%s/ssh-pwd-console %s %d %s %s", cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, creds.Password)
-	} else {
-		// Key based auth, note that we still use the username from the secure store.
-		slog.Debug("Configuring SSH console with key", "nodeID", nci.ID, "host", nci.ConnectionHost, "port", nci.ConnectionPort, "username", creds.Username, "keyPath", sshConsoleKeyPath, "entryCmd", nci.ConsoleEntryCommand)
-		devArgs = fmt.Sprintf("%s/ssh-key-console %s %d %s %s", cs.config.ConsoleScriptsPath, nci.ConnectionHost, nci.ConnectionPort, creds.Username, sshConsoleKeyPath)
-	}
-
-	if nci.ConsoleEntryCommand != "" {
-		// Encode the entry command in base64 to avoid issues with special characters, conman can't handle escaping quotes.
-		base64EncodedCmd := base64.StdEncoding.EncodeToString([]byte(nci.ConsoleEntryCommand))
-		devArgs = fmt.Sprintf("%s %s", devArgs, base64EncodedCmd)
-	}
-
-	return fmt.Sprintf("console name=\"%s\" dev=\"%s\"\n", nci.ID, devArgs)
-}
 
 func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleInfo, passwords map[string]compcredentials.CompCredentials, sshConsoleKeyPath string, forceUpdate bool) (bool, error) {
 	slog.Info("Updating conman configuration file")
@@ -155,23 +133,21 @@ func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 	slog.Info("Populating conman configuration with nodes", "nodeCount", len(nodeMap))
 
 	consoles := make([]string, 0, len(nodeMap))
+	ipmiCount := 0
 
 	for _, nci := range nodeMap {
-		creds, ok := passwords[nci.ID]
-		if !ok {
-			slog.Warn("No credentials found for node", "nodeID", nci.ID)
-		}
-
 		switch nci.ConnectionType {
-		// IPMI connection
 		case nodes.IPMI:
-			output := generateIPMIConsoleConfig(nci, creds)
-			consoles = append(consoles, output)
+			creds, ok := passwords[nci.ID]
+			if !ok {
+				slog.Warn("No credentials found for node", "nodeID", nci.ID)
+			}
+			consoles = append(consoles, generateIPMIConsoleConfig(nci, creds))
+			ipmiCount++
 
-		// SSH connection
 		case nodes.SSH:
-			output := cs.generateSSHConsoleConfig(nci, creds, sshConsoleKeyPath)
-			consoles = append(consoles, output)
+			// SSH nodes are managed by SSHConsoleManager, not conman.
+			slog.Debug("Skipping SSH node in conman config", "nodeID", nci.ID)
 		}
 	}
 
@@ -183,7 +159,8 @@ func (cs *ConmanService) updateConfigFile(nodeMap map[string]*nodes.NodeConsoleI
 		}
 	}
 
-	return len(nodeMap) > 0, nil
+	// Only report hasNodes=true for IPMI nodes; SSH nodes don't need conman.
+	return ipmiCount > 0, nil
 }
 
 // SignalConmanTERM sends SIGTERM to running conmand process

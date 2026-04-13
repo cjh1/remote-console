@@ -351,19 +351,19 @@ func (s *IntegrationTestSuite) TestConsoleTailLinesFollow() {
 }
 
 func (s *IntegrationTestSuite) TestConsoleTailEntryCommand() {
-	// Test that the entry command is executed when connecting to the console
+	// Test that the entry command is executed when connecting to the console.
+	// x0c0s0b0n0 connects to the same SSH server as the ssh-password fixture (x0c0s0b0),
+	// so we broadcast via that container's broadcast.sh the same way other SSH fixtures do.
 	console := consoleFixture{
 		name:           "ssh-entry-cmd",
 		nodeID:         "x0c0s0b0n0",
-		containerKey:   "remote-console",
+		containerKey:   "ssh-password",
 		username:       "ADMIN",
 		password:       "ADMIN",
 		readyLogMarker: "Welcome to OpenSSH Server",
 		prompt:         ":~$ ",
-		// We use 'expect' here as with the entry command there may not be a pty that
-		// broadcast.sh can write to, so we spawn conman in expect to echo a message
 		broadcastCmd: func(msg string) []string {
-			return []string{"expect", "-c", fmt.Sprintf("spawn conman x0c0s0b0n0; expect \"password:\"; expect \":~$ \"; send \"echo '%s'\\r\"; send \"&.\\r\"; expect eof", msg)}
+			return []string{"broadcast.sh", msg}
 		},
 	}
 

@@ -54,8 +54,8 @@ func (s *IntegrationTestSuite) TestConsoleCredentialRefresh() {
 	s.T().Log("Waiting for credential monitor to detect change...")
 	time.Sleep(15 * time.Second)
 
-	// SSH returns "Permission denied, please try again." when password auth fails.
-	authOutput, err := s.readWebSocketUntil(wsConn, "Permission denied", 2*time.Minute)
+	// The Go SSH backend broadcasts a connect-failed marker when authentication fails.
+	authOutput, err := s.readWebSocketUntil(wsConn, fmt.Sprintf("[Console %s connect failed:", nodeID), 2*time.Minute)
 	s.Require().NoError(err, "expected authentication error after credentials were set incorrectly")
 	s.T().Logf("Observed auth error in console output: %s", authOutput)
 
@@ -67,7 +67,7 @@ func (s *IntegrationTestSuite) TestConsoleCredentialRefresh() {
 	s.T().Log("Waiting for credential monitor to detect restored credentials...")
 	time.Sleep(15 * time.Second)
 
-	reconnectMarker := fmt.Sprintf("<ConMan> Connection to console [%s] opened", nodeID)
+	reconnectMarker := fmt.Sprintf("[Console %s connected at", nodeID)
 	reconnectOutput, err := s.readWebSocketUntil(wsConn, reconnectMarker, 2*time.Minute)
 	s.Require().NoError(err, "expected conman to reconnect after credentials were restored")
 	s.T().Logf("Observed reconnection marker in console output: %s", reconnectOutput)

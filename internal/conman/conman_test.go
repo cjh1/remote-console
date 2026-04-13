@@ -99,6 +99,8 @@ func TestConfigureConman(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, generatedConfig)
 
+	// SSH nodes (x0c0s2b0, x0c0s3b0) are managed by SSHConsoleManager and must
+	// not appear in the conman config.
 	expected := `# UPDATE_CONFIG=TRUE
 SERVER keepalive=ON
 SERVER logdir="/logs"
@@ -111,8 +113,6 @@ GLOBAL seropts="115200,8n1"
 GLOBAL log="conman/console.%N"
 GLOBAL logopts="sanitize,timestamp"
 console name="x0c0s1b0" dev="ipmi:x0c0s1b0" ipmiopts="U:admin,P:password1,W:solpayloadsize"
-console name="x0c0s2b0" dev="/usr/bin/ssh-key-console x0c0s2b0 2222 admin /tmp/ssh_console_key"
-console name="x0c0s3b0" dev="/usr/bin/ssh-pwd-console x0c0s3b0 0 admin password3"
 `
 	// Remove temporary directory path from generated config for comparison
 	generatedConfigStr := string(generatedConfig)

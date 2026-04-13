@@ -29,6 +29,11 @@ type NodeConsoleInfo struct {
 	ConsoleEntryCommand string `json:"consoleEntryCommand"` // optional command to run after connecting
 }
 
+// IsSSH reports whether the node uses a direct SSH console connection.
+func (n *NodeConsoleInfo) IsSSH() bool {
+	return n.ConnectionType == SSH
+}
+
 func (nc NodeConsoleInfo) String() string {
 	return fmt.Sprintf("ID:%s, ConnectionType:%s, ConnectionHost:%s, ConnectionPort:%d",
 		nc.ID, nc.ConnectionType, nc.ConnectionHost, nc.ConnectionPort)

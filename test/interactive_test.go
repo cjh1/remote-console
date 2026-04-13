@@ -212,9 +212,80 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 	// Give the console a moment to stabilize
 	time.Sleep(2 * time.Second)
 
-	// Add a new node to trigger conmand restart
+	// Stop the SSH container to trigger a disconnection
+	s.T().Log("Stopping SSH container to trigger disconnection")
+	stopTimeout := 10 * time.Second
+	s.Require().NoError(s.containers["ssh-password"].Stop(context.Background(), &stopTimeout))
+
+	// Verify disconnect message appears
+	disconnectMsg := fmt.Sprintf("[Console %s disconnected at", existingNodeID)
+	output, err := s.readWebSocketUntil(wsConn, disconnectMsg, 2*time.Minute)
+	s.Require().NoError(err, "Expected disconnect message")
+	s.Require().Contains(output, disconnectMsg, "Expected disconnect message in output")
+	s.T().Logf("Saw disconnect message: %s", output)
+
+	// Restart the SSH container so the node can reconnect
+	s.T().Log("Starting SSH container to allow reconnection")
+	s.Require().NoError(s.containers["ssh-password"].Start(context.Background()))
+
+	// Wait for reconnection banner
+	connectedMsg := fmt.Sprintf("[Console %s connected at", existingNodeID)
+	output, err = s.readWebSocketUntil(wsConn, connectedMsg, 2*time.Minute)
+	s.Require().NoError(err, "Expected connected message after reconnection")
+	s.Require().Contains(output, connectedMsg, "Expected connected message in output")
+	s.T().Logf("Saw connected message: %s", output)
+
+	// Wait for console prompt to appear after reconnection
+	s.T().Log("Waiting for console prompt after reconnection")
+	_, err = s.waitForConsolePrompt(wsConn, ":~$ ", promptTimeout)
+	s.Require().NoError(err, "Expected console prompt after reconnection")
+	s.T().Log("Console prompt received after reconnection")
+
+	// Rerun hostname command to verify reconnection worked
+	s.T().Log("Running hostname command after reconnection")
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
+	s.Require().NoError(err, "Error sending hostname command after reconnect")
+
+	hostnameOutput2, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output after reconnection")
+	s.Require().Contains(hostnameOutput2, expectedHostLine, "Expected hostname in output after reconnection")
+	s.T().Logf("Hostname output after reconnection: %s", hostnameOutput2)
+
+	s.T().Log("Reconnection test completed successfully")
+}
+
+func (s *IntegrationTestSuite) TestConsoleInteractiveNewNodeNoDisrupt() {
+	// Verify that adding a new SSH node does not disrupt an existing interactive session.
+	// Previously (conman era) adding a node caused conmand to restart, which briefly
+	// disconnected all existing consoles. With the Go SSH backend each node runs
+	// independently, so existing sessions must be unaffected.
+	console := consoleFixtures["ssh-password"]
+	existingNodeID := console.nodeID
+	promptTimeout := 90 * time.Second
+
+	wsConn, resp, err := s.connectInteractiveConsole(existingNodeID, console.prompt, promptTimeout)
+	s.Require().NoError(err)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			s.T().Logf("Warning: failed to close response body: %v", err)
+		}
+		if err := wsConn.Close(); err != nil {
+			s.T().Logf("Warning: failed to close websocket: %v", err)
+		}
+	}()
+
+	// Verify the existing console is working before adding a new node.
+	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
+	s.Require().NoError(err, "Error sending hostname command")
+	expectedHostLine := existingNodeID + "\r\n"
+	hostnameOutput, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
+	s.Require().NoError(err, "Expected hostname output before new node added")
+	s.Require().Contains(hostnameOutput, expectedHostLine)
+	s.T().Logf("Initial hostname output: %s", hostnameOutput)
+
+	// Add a new SSH node.
 	newNodeID := "x0c0s10b0"
-	s.T().Logf("Adding new node %s to trigger conmand restart", newNodeID)
+	s.T().Logf("Adding new node %s", newNodeID)
 
 	authConfig := defaultAuthConfig
 	rfContainer, err := startRedfishEmulator(context.Background(), s.rfNetwork.Name, newNodeID, "ssh", &authConfig)
@@ -247,9 +318,7 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 	})
 	s.Require().NoError(err, "failed to register new Redfish endpoint")
 
-	// Clean up the Redfish endpoint at the end to avoid interfering with other tests
 	defer func() {
-		s.T().Logf("Removing Redfish endpoint %s", newNodeID)
 		smdAPIURL, err := getSMDAPIURL(context.Background(), s.containers["smd"])
 		if err != nil {
 			s.T().Errorf("Warning: failed to get SMD API URL: %v", err)
@@ -260,38 +329,20 @@ func (s *IntegrationTestSuite) TestConsoleInteractiveReconnect() {
 		}
 	}()
 
-	// Verify reconnect messages appear
-	s.T().Log("Waiting for reconnection messages")
-	reconnectingMsg := fmt.Sprintf("[Reconnecting to %s", existingNodeID)
-	output, err := s.readWebSocketUntil(wsConn, reconnectingMsg, 2*time.Minute)
-	s.Require().NoError(err, "Expected reconnecting message")
-	s.Require().Contains(output, reconnectingMsg, "Expected reconnecting message in output")
-	s.T().Logf("Saw reconnecting message: %s", output)
+	// Wait for remote-console to discover the new node.
+	s.Require().NoError(s.waitForConsoleID(newNodeID, 3*time.Minute), "remote-console did not detect new console")
+	s.T().Logf("New node %s is visible in remote-console", newNodeID)
 
-	// Wait for ConMan connection banner to confirm successful reconnection
-	conmanConnectedMsg := fmt.Sprintf("<ConMan> Connection to console [%s] opened", existingNodeID)
-	output, err = s.readWebSocketUntil(wsConn, conmanConnectedMsg, 2*time.Minute)
-	s.Require().NoError(err, "Expected ConMan connection banner")
-	s.Require().Contains(output, conmanConnectedMsg, "Expected ConMan connection banner in output")
-	s.T().Logf("Saw ConMan connection banner: %s", output)
-
-	// Wait for console prompt to appear after reconnection
-	s.T().Log("Waiting for console prompt after reconnection")
-	_, err = s.waitForConsolePrompt(wsConn, ":~$ ", promptTimeout)
-	s.Require().NoError(err, "Expected console prompt after reconnection")
-	s.T().Log("Console prompt received after reconnection")
-
-	// Rerun hostname command to verify reconnection worked
-	s.T().Log("Running hostname command after reconnection")
+	// The existing session must still be alive and functional — no disconnect markers,
+	// no reconnect banners.
 	err = wsConn.WriteMessage(websocket.TextMessage, []byte("hostname\r"))
-	s.Require().NoError(err, "Error sending hostname command after reconnect")
-
+	s.Require().NoError(err, "Error sending hostname command after new node added")
 	hostnameOutput2, err := s.readWebSocketUntil(wsConn, expectedHostLine, promptTimeout)
-	s.Require().NoError(err, "Expected hostname output after reconnection")
-	s.Require().Contains(hostnameOutput2, expectedHostLine, "Expected hostname in output after reconnection")
-	s.T().Logf("Hostname output after reconnection: %s", hostnameOutput2)
-
-	s.T().Log("Reconnection test completed successfully")
+	s.Require().NoError(err, "Expected hostname output after new node added")
+	s.Require().Contains(hostnameOutput2, expectedHostLine, "Expected hostname in output after new node added")
+	s.Require().NotContains(hostnameOutput2, fmt.Sprintf("[Console %s disconnected", existingNodeID),
+		"Existing session must not have disconnected when a new node was added")
+	s.T().Logf("Existing session still alive after new node added: %s", hostnameOutput2)
 }
 
 func (s *IntegrationTestSuite) TestConsoleInteractiveClientClose() {

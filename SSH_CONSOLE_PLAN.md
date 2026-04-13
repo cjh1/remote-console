@@ -197,11 +197,13 @@ existing comment in `conman.go`: "Key based auth, note that we still use the use
 from the secure store"). The `Auth` field is populated using one of three modes, checked
 in order:
 
-1. **Certificate + key**: `keyPath` exists AND `keyPath+"-cert.pub"` exists →
-   `gossh.ParsePrivateKey()` + `gossh.ParsePublicKey()` + `gossh.NewCertSigner()` →
+1. **Password**: `creds.Password != ""` → `gossh.Password(creds.Password)`
+   (takes priority even when a key file is also present — matches `ssh-pwd-console`)
+2. **Certificate + key**: no password AND `keyPath+"-cert.pub"` exists →
+   `gossh.ParsePrivateKey()` + `gossh.ParseAuthorizedKey()` + `gossh.NewCertSigner()` →
    `gossh.PublicKeys(certSigner)`
-2. **Key only**: `keyPath` exists, no cert → `gossh.PublicKeys(signer)`
-3. **Password**: `creds.Password != ""` → `gossh.Password(creds.Password)`
+3. **Key only**: no password, no cert → `gossh.PublicKeys(signer)`
+   (matches `ssh-key-console`)
 
 This matches what `EnsureConsoleKeysPresent` writes: private key at `keyPath`, optional
 certificate at `keyPath+"-cert.pub"`.
